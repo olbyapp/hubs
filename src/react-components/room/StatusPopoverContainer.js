@@ -13,12 +13,21 @@ const statusPopoverTitle = defineMessage({
   defaultMessage: "Status"
 });
 
-const statusLabels = defineMessages({
+const statusOptionLabels = defineMessages({
   none: { id: "status-popover.status-none", defaultMessage: "Online" },
   work: { id: "status-popover.status-work", defaultMessage: "Work" },
   eat: { id: "status-popover.status-eat", defaultMessage: "Eat" },
   thinking: { id: "status-popover.status-thinking", defaultMessage: "Thinking (silence, callable)" },
   afk: { id: "status-popover.status-afk", defaultMessage: "AFK (silence, no calls)" }
+});
+
+// Short labels for the toolbar button — long ones overflow onto neighbors.
+const statusShortLabels = defineMessages({
+  none: { id: "status-popover.short-none", defaultMessage: "Online" },
+  work: { id: "status-popover.short-work", defaultMessage: "Work" },
+  eat: { id: "status-popover.short-eat", defaultMessage: "Eat" },
+  thinking: { id: "status-popover.short-thinking", defaultMessage: "Thinking" },
+  afk: { id: "status-popover.short-afk", defaultMessage: "AFK" }
 });
 
 export function StatusPopoverContainer() {
@@ -47,7 +56,7 @@ export function StatusPopoverContainer() {
                 closePopover();
               }}
             >
-              {intl.formatMessage(statusLabels[status])}
+              {intl.formatMessage(statusOptionLabels[status])}
             </Button>
           ))}
         </Column>
@@ -62,7 +71,7 @@ export function StatusPopoverContainer() {
             icon={<AvatarIcon />}
             selected={popoverVisible}
             onClick={togglePopover}
-            label={current !== "none" ? intl.formatMessage(statusLabels[current]) : title}
+            label={current !== "none" ? intl.formatMessage(statusShortLabels[current]) : title}
             preset="accent3"
           />
         </ToolTip>

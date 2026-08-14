@@ -19,6 +19,18 @@ import { ReactComponent as UserSoundOffIcon } from "../icons/UserSoundOff.svg";
 import { List, ButtonListItem } from "../layout/List";
 import { FormattedMessage, defineMessage, useIntl } from "react-intl";
 import { PermissionNotification } from "./PermissionNotifications";
+import { STATUS_DISPLAY_NAMES, STATUS_COLORS } from "../../utils/user-status";
+
+function StatusLabel({ status }) {
+  const s = status && STATUS_DISPLAY_NAMES[status] ? status : "none";
+  return (
+    <span style={{ color: STATUS_COLORS[s], fontWeight: 600, whiteSpace: "nowrap" }}>{STATUS_DISPLAY_NAMES[s]}</span>
+  );
+}
+
+StatusLabel.propTypes = {
+  status: PropTypes.string
+};
 
 const toolTipDescription = defineMessage({
   id: "people-sidebar.muted-tooltip",
@@ -177,6 +189,7 @@ export function PeopleSidebar({
                   </ToolTip>
                 )}
                 <p>{getPersonName(person, intl)}</p>
+                <StatusLabel status={person.profile && person.profile.status} />
                 {person.roles.owner && (
                   <StarIcon
                     title={intl.formatMessage({ id: "people-sidebar.moderator-label", defaultMessage: "Moderator" })}

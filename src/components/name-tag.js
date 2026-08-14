@@ -8,7 +8,7 @@ import { createPlaneBufferGeometry, setMatrixWorld } from "../utils/three-utils"
 import { textureLoader } from "../utils/media-utils";
 
 import handRaisedIconSrc from "../assets/hud/hand-raised.png";
-import { STATUS_LABELS } from "../utils/user-status";
+import { STATUS_LABELS, STATUS_COLORS } from "../utils/user-status";
 
 const DEBUG = qsTruthy("debug");
 const NAMETAG_BACKGROUND_PADDING = 0.05;
@@ -85,6 +85,7 @@ AFRAME.registerComponent("name-tag", {
     this.modBadge = this.el.querySelector(".modBadge").object3D;
     this.nametagText = this.el.querySelector(".nametag-text").object3D;
     this.pronounsText = this.el.querySelector(".pronouns-text").object3D;
+    this.statusText = this.el.querySelector(".status-text").object3D;
 
     this.handRaised = new THREE.Mesh(handRaisedGeometry, handRaisedMaterial);
     this.handRaised.position.set(0, -0.3, 0.001);
@@ -232,27 +233,25 @@ AFRAME.registerComponent("name-tag", {
   updateNametagWidth() {
     this.pronounsText.el.components["text"].getSize(this.size);
     const pronounsTextSize = this.size.x || 0;
+    this.statusText.el.components["text"].getSize(this.size);
+    const statusTextSize = this.size.x || 0;
     this.nametagText.el.components["text"].getSize(this.size);
-    this.size.x = Math.max(this.size.x, pronounsTextSize, NAMETAG_MIN_WIDTH);
+    this.size.x = Math.max(this.size.x, pronounsTextSize, statusTextSize, NAMETAG_MIN_WIDTH);
     this.resizeNameTag();
   },
 
   updateDisplayName() {
-    if (this.displayName) {
+    if (this.displayName && this.displayName !== this.prevDisplayName) {
+      this.nametagText.el.addEventListener("text-updated", () => this.updateNametagWidth(), {
+        once: true
+      });
       if (this.displayName.length > DISPLAY_NAME_LENGTH) {
         this.displayName = this.displayName.slice(0, DISPLAY_NAME_LENGTH).concat("...");
       }
-      const statusLabel = this.status && STATUS_LABELS[this.status];
-      const displayValue = statusLabel ? `${this.displayName} [${statusLabel}]` : this.displayName;
-      if (displayValue !== this.prevDisplayName) {
-        this.nametagText.el.addEventListener("text-updated", () => this.updateNametagWidth(), {
-          once: true
-        });
-        this.nametagText.el.setAttribute("text", {
-          value: displayValue
-        });
-        this.prevDisplayName = displayValue;
-      }
+      this.nametagText.el.setAttribute("text", {
+        value: this.displayName
+      });
+      this.prevDisplayName = this.displayName;
     }
 
     if (this.identityName) {
@@ -264,6 +263,23 @@ AFRAME.registerComponent("name-tag", {
 
     this.nametagText.position.set(0, this.nameTagTextY, 0.001);
     this.nametagText.matrixNeedsUpdate = true;
+  },
+
+  updateStatus() {
+    const label = (this.status && STATUS_LABELS[this.status]) || "";
+    if (label !== this.prevStatusLabel) {
+      this.statusText.el.addEventListener("text-updated", () => this.updateNametagWidth(), {
+        once: true
+      });
+      this.statusText.el.setAttribute("text", {
+        value: label,
+        color: STATUS_COLORS[this.status] || STATUS_COLORS.none
+      });
+      this.prevStatusLabel = label;
+    }
+    // Shares the pronouns line unless pronouns are set, then sits below them.
+    this.statusText.position.set(0, this.pronouns ? -0.09 : 0, 0.001);
+    this.statusText.matrixNeedsUpdate = true;
   },
 
   updatePronouns() {
@@ -301,7 +317,7 @@ AFRAME.registerComponent("name-tag", {
   },
 
   updateElements() {
-    if (this.pronouns) {
+    if (this.pronouns || (this.status && STATUS_LABELS[this.status])) {
       this.nameTagHeight = NAMETAG_PRONOUN_HEIGHT;
       this.nameTagOffset = NAMETAG_PRONOUN_OFFSET;
       this.nameTagVolumeY = NAMETAG_VOLUME_PRONOUN_Y;
@@ -322,8 +338,10 @@ AFRAME.registerComponent("name-tag", {
     this.nametagElPosY = this.nametagHeight + (this.isHandRaised ? this.nameTagOffset : 0);
     this.pronounsText.el && this.pronounsText.el.components["text"].getSize(this.size);
     const pronounsTextSize = this.size.x;
+    this.statusText.el && this.statusText.el.components["text"].getSize(this.size);
+    const statusTextSize = this.size.x;
     this.nametagText.el.components["text"].getSize(this.size);
-    this.size.x = Math.max(this.size.x, pronounsTextSize, NAMETAG_MIN_WIDTH);
+    this.size.x = Math.max(this.size.x, pronounsTextSize, statusTextSize, NAMETAG_MIN_WIDTH);
     this.nametagVolume.position.set(0, this.nameTagVolumeY, 0.001);
     this.nametagVolume.matrixNeedsUpdate = true;
     this.nametagTyping.position.set(0, this.nameTagVolumeY, 0.001);
@@ -331,6 +349,7 @@ AFRAME.registerComponent("name-tag", {
 
     this.updateDisplayName();
     this.updatePronouns();
+    this.updateStatus();
     this.updateHandRaised();
     this.resizeNameTag();
   },

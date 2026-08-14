@@ -1202,7 +1202,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const sfx = scene.systems["hubs-systems"].soundEffectsSystem;
     const ringNode = sfx.playSoundLooped(SOUND_SPEAKER_TONE);
     if (ringNode) {
-      setTimeout(() => sfx.stopSoundNode(ringNode), 4000);
+      setTimeout(() => sfx.stopSoundNode(ringNode), 10000);
     }
     messageDispatch.receive({
       type: "chat",
