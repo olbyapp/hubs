@@ -348,10 +348,10 @@ export default class MediaDevicesManager extends EventEmitter {
       if (isDisplayMedia) {
         newStream = await navigator.mediaDevices.getDisplayMedia({
           video: {
-            // Work around BMO 1449832 by calculating the width. This will break for multi monitors if you share anything
-            // other than your current monitor that has a different aspect ratio.
-            width: 720 * (screen.width / screen.height),
-            height: 720,
+            // Capture at native resolution — the old 720p cap made shared text
+            // unreadable. "ideal" keeps other-aspect windows/monitors working.
+            width: { ideal: screen.width },
+            height: { ideal: screen.height },
             frameRate: 30
           },
           audio: {
@@ -375,7 +375,15 @@ export default class MediaDevicesManager extends EventEmitter {
         videoTrackAdded = true;
 
         newStream.getVideoTracks().forEach(track => {
-          // Ideally we would use track.contentHint but it seems to be read-only in Chrome so we just add a custom property
+          if (isDisplayMedia) {
+            try {
+              // Writable in modern Chrome/Firefox: makes the encoder favor
+              // sharpness over motion smoothness — critical for shared text.
+              track.contentHint = "detail";
+            } catch (e) {
+              // Older browsers: hint stays default, capture resolution still helps.
+            }
+          }
           track["_hubs_contentHint"] = isDisplayMedia ? MediaDevices.SCREEN : MediaDevices.CAMERA;
           track.addEventListener("ended", async () => {
             this._scene.emit(MediaDevicesEvents.VIDEO_SHARE_ENDED);

@@ -35,9 +35,11 @@ const WEBCAM_SIMULCAST_ENCODINGS = [
 ];
 
 // Used for simulcast screen sharing.
+// Raised from 1.5/6 Mbps: native-resolution text needs headroom. Dialog's
+// per-transport maxIncomingBitrate is raised to match (see dialog-config ConfigMap).
 const SCREEN_SHARING_SIMULCAST_ENCODINGS = [
-  { dtx: true, maxBitrate: 1500000 },
-  { dtx: true, maxBitrate: 6000000 }
+  { dtx: true, maxBitrate: 2000000 },
+  { dtx: true, maxBitrate: 8000000 }
 ];
 
 export const DIALOG_CONNECTION_CONNECTED = "dialog-connection-connected";
