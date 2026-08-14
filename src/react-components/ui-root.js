@@ -80,6 +80,7 @@ import { PlacePopoverContainer } from "./room/PlacePopoverContainer";
 import { SharePopoverContainer } from "./room/SharePopoverContainer";
 import { AudioPopoverButtonContainer } from "./room/AudioPopoverButtonContainer";
 import { ReactionPopoverContainer } from "./room/ReactionPopoverContainer";
+import { StatusPopoverContainer } from "./room/StatusPopoverContainer";
 import { SafariMicModal } from "./room/SafariMicModal";
 import { RoomSignInModalContainer } from "./auth/RoomSignInModalContainer";
 import { SignInStep } from "./auth/SignInModal";
@@ -1644,6 +1645,7 @@ class UIRoot extends Component {
                             initialPresence={getPresenceProfileForSession(this.props.presences, this.props.sessionId)}
                           />
                         )}
+                        <StatusPopoverContainer />
                       </>
                     )}
                     {!isLockedDownDemo && (

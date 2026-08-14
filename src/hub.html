@@ -184,6 +184,12 @@
                                                 visible-if-permitted="kick_users" position="0 0 0.001"></a-entity>
                                         </a-entity>
                                         <a-entity is-remote-hover-target tags="singleActionButton:true;"
+                                            mixin="rounded-text-button" call-button
+                                            position="0 -0.7 .35" scale="0.8 0.8 0.8">
+                                            <a-entity text="value:Call; textAlign:center;" text-raycast-hack
+                                                position="0 0 0.001"></a-entity>
+                                        </a-entity>
+                                        <a-entity is-remote-hover-target tags="singleActionButton:true;"
                                             mixin="rounded-text-button"
                                             camera-focus-button="track: false; selector: .Head;"
                                             position="-0.40 0.375 0.35">

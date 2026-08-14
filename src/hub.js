@@ -86,6 +86,7 @@ import "./components/text-button";
 import "./components/block-button";
 import "./components/mute-button";
 import "./components/kick-button";
+import "./components/call-button";
 import "./components/close-vr-notice-button";
 import "./components/leave-room-button";
 import "./components/visible-if-permitted";
@@ -161,6 +162,7 @@ import { createInWorldLogMessage } from "./react-components/chat-message";
 import { fetchRandomDefaultAvatarId } from "./utils/identity.js";
 
 import "./systems/nav";
+import { SOUND_SPEAKER_TONE } from "./systems/sound-effects-system";
 import "./systems/frame-scheduler";
 import "./systems/personal-space-bubble";
 import "./systems/app-mode";
@@ -1188,6 +1190,28 @@ document.addEventListener("DOMContentLoaded", async () => {
   const messageDispatch = new MessageDispatch(scene, entryManager, hubChannel, remountUI, mediaSearchStore);
   APP.messageDispatch = messageDispatch;
   document.getElementById("avatar-rig").messageDispatch = messageDispatch;
+
+  // Incoming "call" (vegamix): ring unless we are AFK. Rings through the SFX
+  // mixer, which quiet statuses deliberately leave at full volume.
+  NAF.connection.subscribeToDataChannel("call", senderId => {
+    const myStatus = (APP.store.state.profile && APP.store.state.profile.status) || "none";
+    if (myStatus === "afk") return;
+    const senderState = hubChannel.presence.state[senderId];
+    const senderMeta = senderState && senderState.metas[senderState.metas.length - 1];
+    const senderName = (senderMeta && senderMeta.profile && senderMeta.profile.displayName) || "Someone";
+    const sfx = scene.systems["hubs-systems"].soundEffectsSystem;
+    const ringNode = sfx.playSoundLooped(SOUND_SPEAKER_TONE);
+    if (ringNode) {
+      setTimeout(() => sfx.stopSoundNode(ringNode), 4000);
+    }
+    messageDispatch.receive({
+      type: "chat",
+      name: senderName,
+      body: "📞 is calling you!",
+      sent: false,
+      sessionId: senderId
+    });
+  });
 
   const oauthFlowPermsToken = Cookies.get(OAUTH_FLOW_PERMS_TOKEN_KEY);
   if (oauthFlowPermsToken) {

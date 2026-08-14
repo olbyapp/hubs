@@ -292,6 +292,25 @@ export default class SceneEntryManager {
       );
     });
 
+    this.scene.addEventListener("action_call_client", ({ detail: { clientId } }) => {
+      const presenceState = window.APP.hubChannel.presence.state[clientId];
+      const meta = presenceState && presenceState.metas[presenceState.metas.length - 1];
+      const targetName = (meta && meta.profile && meta.profile.displayName) || "user";
+      const targetStatus = (meta && meta.profile && meta.profile.status) || "none";
+      if (targetStatus === "afk") {
+        window.APP.messageDispatch.receive({
+          type: "chat",
+          name: "System",
+          body: `${targetName} is AFK and can not be called`,
+          sent: false,
+          sessionId: clientId
+        });
+        return;
+      }
+      NAF.connection.sendDataGuaranteed(clientId, "call", { from: NAF.clientId });
+      window.APP.hubChannel.sendMessage(`📞 calling ${targetName}!`);
+    });
+
     this.scene.addEventListener("action_vr_notice_closed", () => forceExitFrom2DInterstitial());
 
     {

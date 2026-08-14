@@ -8,6 +8,7 @@ import { createPlaneBufferGeometry, setMatrixWorld } from "../utils/three-utils"
 import { textureLoader } from "../utils/media-utils";
 
 import handRaisedIconSrc from "../assets/hud/hand-raised.png";
+import { STATUS_LABELS } from "../utils/user-status";
 
 const DEBUG = qsTruthy("debug");
 const NAMETAG_BACKGROUND_PADDING = 0.05;
@@ -48,6 +49,7 @@ AFRAME.registerComponent("name-tag", {
     this.displayName = null;
     this.pronouns = null;
     this.identityName = null;
+    this.status = null;
     this.isTalking = false;
     this.isTyping = false;
     this.isOwner = false;
@@ -217,6 +219,7 @@ AFRAME.registerComponent("name-tag", {
     this.displayName = presenceMeta.profile.displayName;
     this.pronouns = presenceMeta.profile.pronouns;
     this.identityName = presenceMeta.profile.identityName;
+    this.status = presenceMeta.profile.status || null;
     this.isRecording = !!(presenceMeta.streaming || presenceMeta.recording);
     this.isOwner = !!(presenceMeta.roles && presenceMeta.roles.owner);
     this.isTyping = !!presenceMeta.typing;
@@ -235,17 +238,21 @@ AFRAME.registerComponent("name-tag", {
   },
 
   updateDisplayName() {
-    if (this.displayName && this.displayName !== this.prevDisplayName) {
-      this.nametagText.el.addEventListener("text-updated", () => this.updateNametagWidth(), {
-        once: true
-      });
+    if (this.displayName) {
       if (this.displayName.length > DISPLAY_NAME_LENGTH) {
         this.displayName = this.displayName.slice(0, DISPLAY_NAME_LENGTH).concat("...");
       }
-      this.nametagText.el.setAttribute("text", {
-        value: this.displayName
-      });
-      this.prevDisplayName = this.displayName;
+      const statusLabel = this.status && STATUS_LABELS[this.status];
+      const displayValue = statusLabel ? `${this.displayName} [${statusLabel}]` : this.displayName;
+      if (displayValue !== this.prevDisplayName) {
+        this.nametagText.el.addEventListener("text-updated", () => this.updateNametagWidth(), {
+          once: true
+        });
+        this.nametagText.el.setAttribute("text", {
+          value: displayValue
+        });
+        this.prevDisplayName = displayValue;
+      }
     }
 
     if (this.identityName) {
