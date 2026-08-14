@@ -33,6 +33,9 @@ import { MediaContentBounds } from "../bit-components";
 
 let loadingObject;
 
+// How often pasted web-page widgets re-screenshot themselves (see _setupPageAutoRefresh).
+const PAGE_AUTO_REFRESH_MS = 30000;
+
 waitForDOMContentLoaded().then(() => {
   loadModel(loadingObjectSrc).then(gltf => {
     loadingObject = gltf;
@@ -146,6 +149,11 @@ AFRAME.registerComponent("media-loader", {
   },
 
   remove() {
+    if (this._pageRefreshTimer) {
+      clearInterval(this._pageRefreshTimer);
+      this._pageRefreshTimer = null;
+    }
+
     if (this.data.linkedEl) {
       this.data.linkedEl.removeEventListener("componentremoved", this.handleLinkedElRemoved);
     }
@@ -309,12 +317,32 @@ AFRAME.registerComponent("media-loader", {
   },
 
   refresh() {
-    if (this.networkedEl && !NAF.utils.isMine(this.networkedEl) && !NAF.utils.takeOwnership(this.networkedEl)) return;
+    if (this.networkedEl && !NAF.utils.isMine(this.networkedEl) && !NAF.utils.takeOwnership(this.networkedEl)) {
+      // Usually means a signed-out user on a pinned object.
+      console.warn("media-loader: refresh skipped, could not take ownership of", this.data.src);
+      return;
+    }
 
     // When we refresh, we bump the version to the current timestamp.
     //
     // The only use-case for refresh right now is re-fetching screenshots.
     this.el.setAttribute("media-loader", { version: Math.floor(Date.now() / 1000) });
+  },
+
+  // Pasted web pages render as server-side screenshots; re-resolve periodically
+  // so they behave like live dashboards. Exactly one client per room drives the
+  // bump (deterministic election), everyone re-fetches via the networked version.
+  async _setupPageAutoRefresh(src) {
+    if (this._pageRefreshTimer) return;
+    // Hubs' own room/scene/avatar links are also text/html — leave those static.
+    if ((await isLocalHubsAvatarUrl(src)) || (await isHubsRoomUrl(src)) || (await isLocalHubsSceneUrl(src))) return;
+    this._pageRefreshTimer = setInterval(() => {
+      const presence = window.APP.hubChannel && window.APP.hubChannel.presence;
+      if (!presence || !this.el.sceneEl.is("entered")) return;
+      const ids = Object.keys(presence.state).sort();
+      if (ids[0] !== NAF.clientId) return;
+      this.refresh();
+    }, PAGE_AUTO_REFRESH_MS);
   },
 
   async update(oldData, forceLocalRefresh) {
@@ -564,6 +592,7 @@ AFRAME.registerComponent("media-loader", {
           })
         );
       } else if (contentType.startsWith("text/html")) {
+        this._setupPageAutoRefresh(src);
         this.el.removeAttribute("gltf-model-plus");
         this.el.removeAttribute("media-video");
         this.el.removeAttribute("audio-zone-source");
