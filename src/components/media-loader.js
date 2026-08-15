@@ -385,6 +385,25 @@ AFRAME.registerComponent("media-loader", {
     const srcChanged = oldData.src !== src;
     const versionChanged = !!(oldData.version && oldData.version !== version);
 
+    // vegamix: changing only mediaOptions.refreshInterval (the refresh-rate
+    // button, incl. its NAF sync to every client) must not re-run the whole
+    // load pipeline — that cascade could fail transiently and nuke the widget.
+    if (!srcChanged && !versionChanged && !forceLocalRefresh && oldData.mediaOptions) {
+      const stripInterval = mo => {
+        const rest = Object.assign({}, mo);
+        delete rest.refreshInterval;
+        return JSON.stringify(rest);
+      };
+      const onlyIntervalChanged =
+        oldData.contentType === this.data.contentType &&
+        oldData.contentSubtype === this.data.contentSubtype &&
+        oldData.fileId === this.data.fileId &&
+        stripInterval(oldData.mediaOptions) === stripInterval(this.data.mediaOptions) &&
+        (oldData.mediaOptions.refreshInterval !== this.data.mediaOptions.refreshInterval ||
+          JSON.stringify(oldData.mediaOptions) === JSON.stringify(this.data.mediaOptions));
+      if (onlyIntervalChanged) return;
+    }
+
     if (versionChanged) {
       this.el.emit("media_refreshing");
 
@@ -676,6 +695,20 @@ AFRAME.registerComponent("media-loader", {
       }
       if (this.el.components["position-at-border__freeze-unprivileged"]) {
         this.el.setAttribute("position-at-border__freeze-unprivileged", { isFlat: true });
+      }
+      // vegamix: if this entity already displays loaded media, a failed
+      // re-resolve (refresh, transient network/API error) must not replace it
+      // with the broken-media card — keep what we have.
+      if (
+        !srcChanged &&
+        (this.el.components["media-image"] ||
+          this.el.components["media-video"] ||
+          this.el.components["media-pdf"] ||
+          this.el.components["gltf-model-plus"])
+      ) {
+        console.error("Error updating media; keeping current content", e);
+        this.clearLoadingTimeout();
+        return;
       }
       console.error("Error adding media", e);
       this.onError();

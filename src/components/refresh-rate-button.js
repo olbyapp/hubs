@@ -3,7 +3,7 @@
  * (media-loader mediaOptions.refreshInterval, seconds; 0 = off).
  * Lives in the link hover menu next to "open link".
  */
-const STEPS = [10, 30, 60, 300, 0];
+const STEPS = [10, 30, 60, 300, 600, 1800, 0];
 
 function labelFor(intervalS) {
   if (!intervalS) return "auto: off";
