@@ -33,8 +33,11 @@ import { MediaContentBounds } from "../bit-components";
 
 let loadingObject;
 
-// How often pasted web-page widgets re-screenshot themselves (see _setupPageAutoRefresh).
-const PAGE_AUTO_REFRESH_MS = 30000;
+// Pasted web-page widgets re-screenshot themselves (see _setupPageAutoRefresh).
+// Default interval in seconds; per-widget override lives in
+// mediaOptions.refreshInterval (0 = off), cycled via refresh-rate-button.
+const DEFAULT_PAGE_REFRESH_INTERVAL_S = 30;
+const PAGE_REFRESH_TICK_MS = 5000;
 
 waitForDOMContentLoaded().then(() => {
   loadModel(loadingObjectSrc).then(gltf => {
@@ -329,20 +332,49 @@ AFRAME.registerComponent("media-loader", {
     this.el.setAttribute("media-loader", { version: Math.floor(Date.now() / 1000) });
   },
 
-  // Pasted web pages render as server-side screenshots; re-resolve periodically
-  // so they behave like live dashboards. Exactly one client per room drives the
-  // bump (deterministic election), everyone re-fetches via the networked version.
+  // Pasted web pages render as server-side screenshots; re-fetch periodically so
+  // they behave like live dashboards. This swaps ONLY the media-image texture in
+  // place: no version bump, no component teardown, no ownership required. All
+  // clients compute the same time-bucket version, so Reticulum's cache dedupes
+  // the actual photomnemonic render to once per interval per widget globally.
+  // On any failure the current picture stays — a widget never degrades to a
+  // broken-link state from auto-refresh alone.
   async _setupPageAutoRefresh(src) {
     if (this._pageRefreshTimer) return;
     // Hubs' own room/scene/avatar links are also text/html — leave those static.
     if ((await isLocalHubsAvatarUrl(src)) || (await isHubsRoomUrl(src)) || (await isLocalHubsSceneUrl(src))) return;
-    this._pageRefreshTimer = setInterval(() => {
-      const presence = window.APP.hubChannel && window.APP.hubChannel.presence;
-      if (!presence || !this.el.sceneEl.is("entered")) return;
-      const ids = Object.keys(presence.state).sort();
-      if (ids[0] !== NAF.clientId) return;
-      this.refresh();
-    }, PAGE_AUTO_REFRESH_MS);
+    this._pageRefreshSrc = src;
+    this._pageRefreshLastBucket = null;
+    this._pageRefreshInflight = false;
+    this._pageRefreshTimer = setInterval(() => this._tickPageAutoRefresh(), PAGE_REFRESH_TICK_MS);
+  },
+
+  async _tickPageAutoRefresh() {
+    const mediaOptions = this.data.mediaOptions || {};
+    const intervalS =
+      mediaOptions.refreshInterval !== undefined ? mediaOptions.refreshInterval : DEFAULT_PAGE_REFRESH_INTERVAL_S;
+    if (!intervalS) return; // 0 = auto-refresh off
+    if (this._pageRefreshInflight || !this.el.sceneEl.is("entered")) return;
+    const bucket = Math.floor(Date.now() / (intervalS * 1000));
+    if (bucket === this._pageRefreshLastBucket) return;
+
+    this._pageRefreshInflight = true;
+    try {
+      const result = await resolveUrl(this._pageRefreshSrc, null, bucket);
+      const thumbnail = result && result.meta && result.meta.thumbnail;
+      if (!thumbnail || !this.el.components["media-image"]) return;
+      this.el.setAttribute("media-image", {
+        src: proxiedUrlFor(thumbnail),
+        version: bucket,
+        contentType: "image/png"
+      });
+      this._pageRefreshLastBucket = bucket;
+    } catch (e) {
+      // Keep the current picture; the next tick retries this bucket.
+      console.warn("page auto-refresh skipped:", (e && e.message) || e);
+    } finally {
+      this._pageRefreshInflight = false;
+    }
   },
 
   async update(oldData, forceLocalRefresh) {

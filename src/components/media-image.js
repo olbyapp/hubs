@@ -27,9 +27,9 @@ AFRAME.registerComponent("media-image", {
   },
 
   remove() {
-    if (this.currentSrcIsRetained) {
-      textureCache.release(this.data.src, this.data.version);
-      this.currentSrcIsRetained = false;
+    if (this._retainedKey) {
+      textureCache.release(this._retainedKey.src, this._retainedKey.version);
+      this._retainedKey = null;
     }
   },
 
@@ -37,24 +37,21 @@ AFRAME.registerComponent("media-image", {
     let texture;
     let ratio = 1;
 
+    // vegamix: the stock version nulled material.map up front (white flash for
+    // the whole reload, permanent white on a failed reload) and released the
+    // old texture before the new one existed. Instead we keep showing the old
+    // texture and swap+release only when the replacement is ready.
+    const prevRetainedKey = this._retainedKey;
+
     try {
       const { src, version, contentType } = this.data;
       if (!src) return;
 
       this.el.emit("image-loading");
 
-      if (this.mesh && this.mesh.material.map && (src !== oldData.src || version !== oldData.version)) {
-        this.mesh.material.map = null;
-        this.mesh.material.needsUpdate = true;
-        if (this.mesh.material.map !== errorTexture) {
-          textureCache.release(oldData.src, oldData.version);
-          this.currentSrcIsRetained = false;
-        }
-      }
-
       let cacheItem;
       if (textureCache.has(src, version)) {
-        if (this.currentSrcIsRetained) {
+        if (prevRetainedKey && prevRetainedKey.src === src && prevRetainedKey.version === version) {
           cacheItem = textureCache.get(src, version);
         } else {
           cacheItem = textureCache.retain(src, version);
@@ -96,11 +93,21 @@ AFRAME.registerComponent("media-image", {
       texture = cacheItem.texture;
       ratio = cacheItem.ratio;
 
-      this.currentSrcIsRetained = true;
+      this._retainedKey = src === "error" ? null : { src, version };
+      this.currentSrcIsRetained = !!this._retainedKey;
     } catch (e) {
       console.error("Error loading image", this.data.src, e);
       texture = errorTexture;
+      this._retainedKey = null;
       this.currentSrcIsRetained = false;
+    }
+
+    // Release the previously shown texture now that its replacement is in hand.
+    if (
+      prevRetainedKey &&
+      !(this._retainedKey && prevRetainedKey.src === this._retainedKey.src && prevRetainedKey.version === this._retainedKey.version)
+    ) {
+      textureCache.release(prevRetainedKey.src, prevRetainedKey.version);
     }
 
     const projection = this.data.projection;
@@ -132,6 +139,15 @@ AFRAME.registerComponent("media-image", {
       this.mesh = new THREE.Mesh(geometry, material);
       this.mesh.layers.set(Layers.CAMERA_LAYER_FX_MASK);
       this.el.setObject3D("mesh", this.mesh);
+      this.meshFlipY = texture.flipY;
+    } else if (projection === "flat" && this.meshFlipY !== texture.flipY) {
+      // vegamix: the plane's UVs were built for the previous texture's flipY.
+      // Swapping in a texture with the other orientation (e.g. error <-> real
+      // image) rendered upside down — rebuild the geometry to match.
+      const oldGeometry = this.mesh.geometry;
+      this.mesh.geometry = createPlaneBufferGeometry(1, 1, 1, 1, texture.flipY);
+      oldGeometry.dispose();
+      this.meshFlipY = texture.flipY;
     }
 
     if (texture == errorTexture) {

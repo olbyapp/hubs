@@ -87,6 +87,7 @@ import "./components/block-button";
 import "./components/mute-button";
 import "./components/kick-button";
 import "./components/call-button";
+import "./components/refresh-rate-button";
 import "./components/close-vr-notice-button";
 import "./components/leave-room-button";
 import "./components/visible-if-permitted";
