@@ -65,21 +65,37 @@ AFRAME.registerComponent("media-image", {
           await inflightTextures.get(inflightKey);
           cacheItem = textureCache.retain(src, version);
         } else {
-          let promise;
-          if (contentType.includes("image/gif")) {
-            promise = createGIFTexture(src);
-          } else if (contentType.includes("image/basis")) {
-            promise = createBasisTexture(src);
-          } else if (contentType.includes("image/ktx2")) {
-            promise = createKTX2Texture(src);
-          } else if (contentType.startsWith("image/")) {
-            promise = createImageTexture(src);
-          } else {
+          const loadTexture = () => {
+            if (contentType.includes("image/gif")) {
+              return createGIFTexture(src);
+            } else if (contentType.includes("image/basis")) {
+              return createBasisTexture(src);
+            } else if (contentType.includes("image/ktx2")) {
+              return createKTX2Texture(src);
+            } else if (contentType.startsWith("image/")) {
+              return createImageTexture(src);
+            }
             throw new Error(`Unknown image content type: ${contentType}`);
-          }
+          };
+          // vegamix: one retry absorbs transient net::ERR_CONNECTION_CLOSED
+          // from proxy keep-alive races on /files responses.
+          const promise = (async () => {
+            try {
+              return await loadTexture();
+            } catch (e) {
+              await new Promise(resolve => setTimeout(resolve, 1500));
+              return await loadTexture();
+            }
+          })();
           inflightTextures.set(inflightKey, promise);
-          texture = await promise;
-          inflightTextures.delete(inflightKey);
+          try {
+            texture = await promise;
+          } finally {
+            // vegamix: stock code deleted the inflight entry only on success,
+            // so one failed load poisoned this src+version forever (every
+            // retry awaited the same rejected promise until a page reload).
+            inflightTextures.delete(inflightKey);
+          }
           cacheItem = textureCache.set(src, version, texture);
         }
 
@@ -97,6 +113,14 @@ AFRAME.registerComponent("media-image", {
       this.currentSrcIsRetained = !!this._retainedKey;
     } catch (e) {
       console.error("Error loading image", this.data.src, e);
+      // vegamix: if we are already showing a real texture, keep it — swapping
+      // in the broken-link texture over a transient fetch failure turned live
+      // widgets into "broken" ones. The next refresh cycle will retry.
+      if (prevRetainedKey && this.mesh && this.mesh.material.map && this.mesh.material.map !== errorTexture) {
+        this._retainedKey = prevRetainedKey;
+        this.currentSrcIsRetained = true;
+        return;
+      }
       texture = errorTexture;
       this._retainedKey = null;
       this.currentSrcIsRetained = false;

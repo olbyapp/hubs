@@ -319,6 +319,15 @@ AFRAME.registerComponent("media-loader", {
     }
   },
 
+  // mediaOptions as passed down to media components: strips keys that only
+  // media-loader itself understands (refreshInterval would otherwise trigger
+  // "Unknown property" schema warnings on media-image etc).
+  _componentMediaOptions() {
+    const options = Object.assign({}, this.data.mediaOptions);
+    delete options.refreshInterval;
+    return options;
+  },
+
   refresh() {
     if (this.networkedEl && !NAF.utils.isMine(this.networkedEl) && !NAF.utils.takeOwnership(this.networkedEl)) {
       // Usually means a signed-out user on a pinned object.
@@ -355,7 +364,16 @@ AFRAME.registerComponent("media-loader", {
       mediaOptions.refreshInterval !== undefined ? mediaOptions.refreshInterval : DEFAULT_PAGE_REFRESH_INTERVAL_S;
     if (!intervalS) return; // 0 = auto-refresh off
     if (this._pageRefreshInflight || !this.el.sceneEl.is("entered")) return;
-    const bucket = Math.floor(Date.now() / (intervalS * 1000));
+    // Per-widget phase offset (derived from src, so identical on every client)
+    // staggers widgets so they don't all fetch in the same second.
+    if (this._pageRefreshOffset === undefined) {
+      let hash = 0;
+      for (let i = 0; i < this._pageRefreshSrc.length; i++) {
+        hash = (hash * 31 + this._pageRefreshSrc.charCodeAt(i)) | 0;
+      }
+      this._pageRefreshOffset = Math.abs(hash) % 10000;
+    }
+    const bucket = Math.floor((Date.now() - this._pageRefreshOffset) / (intervalS * 1000));
     if (bucket === this._pageRefreshLastBucket) return;
 
     this._pageRefreshInflight = true;
@@ -525,7 +543,7 @@ AFRAME.registerComponent("media-loader", {
         );
         this.el.setAttribute(
           "media-video",
-          Object.assign({}, this.data.mediaOptions, {
+          Object.assign({}, this._componentMediaOptions(), {
             src: accessibleUrl,
             audioSrc: canonicalAudioUrl ? proxiedUrlFor(canonicalAudioUrl) : null,
             time: startTime,
@@ -567,7 +585,7 @@ AFRAME.registerComponent("media-loader", {
         this.el.setAttribute("floaty-object", { reduceAngularFloat: true, releaseGravity: -1 });
         this.el.setAttribute(
           "media-image",
-          Object.assign({}, this.data.mediaOptions, {
+          Object.assign({}, this._componentMediaOptions(), {
             src: accessibleUrl,
             version,
             contentType
@@ -587,7 +605,7 @@ AFRAME.registerComponent("media-loader", {
         this.el.removeAttribute("media-image");
         this.el.setAttribute(
           "media-pdf",
-          Object.assign({}, this.data.mediaOptions, {
+          Object.assign({}, this._componentMediaOptions(), {
             src: accessibleUrl,
             contentType
           })
@@ -635,7 +653,7 @@ AFRAME.registerComponent("media-loader", {
         }
         this.el.setAttribute(
           "gltf-model-plus",
-          Object.assign({}, this.data.mediaOptions, {
+          Object.assign({}, this._componentMediaOptions(), {
             src: accessibleUrl,
             contentType: contentType,
             inflate: true,
@@ -674,7 +692,7 @@ AFRAME.registerComponent("media-loader", {
         this.el.setAttribute("floaty-object", { reduceAngularFloat: true, releaseGravity: -1 });
         this.el.setAttribute(
           "media-image",
-          Object.assign({}, this.data.mediaOptions, {
+          Object.assign({}, this._componentMediaOptions(), {
             src: thumbnail,
             version,
             contentType: guessContentType(thumbnail) || "image/png"
