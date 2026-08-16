@@ -1,5 +1,5 @@
 import { defineQuery } from "bitecs";
-import { Box3, Frustum, Matrix4, Vector3, Object3D, Camera, Mesh } from "three";
+import { Box3, Euler, Frustum, Matrix4, Quaternion, Vector3, Object3D, Camera, Mesh } from "three";
 import { HubsWorld } from "../app";
 import { Billboard } from "../bit-components";
 
@@ -45,12 +45,29 @@ const shouldUpdateBillboard = (world: HubsWorld, billboard: number, camera: Came
   return inVR || isInViewOfCamera(object3D, camera);
 };
 
-const updateBillboard = (world: HubsWorld, billboard: number, camera: Camera) => {
+// World orientation for onlyY billboards in top-down mode: face up, text top
+// pointing "north" (world -Z), which is screen-up for the fixed top-down camera.
+const FACE_UP_QUAT = new Quaternion().setFromEuler(new Euler(-Math.PI / 2, 0, 0));
+const parentQuat = new Quaternion();
+
+const updateBillboard = (world: HubsWorld, billboard: number, camera: Camera, topDown: boolean) => {
   const object3D = world.eid2obj.get(billboard)!;
   // Set the camera world position as the target.
   targetPos.setFromMatrixPosition(camera.matrixWorld);
 
   if (Billboard.onlyY[billboard]) {
+    if (topDown) {
+      // Yaw-only billboards are seen edge-on from above; lay them flat instead.
+      if (object3D.parent) {
+        object3D.parent.updateMatrices();
+        object3D.parent.getWorldQuaternion(parentQuat);
+        object3D.quaternion.copy(parentQuat.invert()).multiply(FACE_UP_QUAT);
+      } else {
+        object3D.quaternion.copy(FACE_UP_QUAT);
+      }
+      object3D.matrixNeedsUpdate = true;
+      return;
+    }
     object3D.getWorldPosition(worldPos);
     targetPos.y = worldPos.y;
   }
@@ -63,7 +80,7 @@ let nextBillboard = 0;
 
 // Billboard component that only updates visible objects and only those in the camera view on mobile VR.
 // TODO billboarding assumes a single camera viewpoint but with video-texture-source, mirrors, and camera tools this is no longer valid
-export function billboardSystem(world: HubsWorld, camera: Camera) {
+export function billboardSystem(world: HubsWorld, camera: Camera, topDown: boolean = false) {
   const billboards = billboardQuery(world);
   if (!billboards.length) return;
   if (isThisMobileVR) {
@@ -71,8 +88,8 @@ export function billboardSystem(world: HubsWorld, camera: Camera) {
       nextBillboard = 0;
     }
     const billboard = billboards[nextBillboard++];
-    shouldUpdateBillboard(world, billboard, camera) && updateBillboard(world, billboard, camera);
+    shouldUpdateBillboard(world, billboard, camera) && updateBillboard(world, billboard, camera, topDown);
   } else {
-    billboards.forEach(billboard => updateBillboard(world, billboard, camera));
+    billboards.forEach(billboard => updateBillboard(world, billboard, camera, topDown));
   }
 }

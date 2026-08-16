@@ -19,6 +19,8 @@ export function RoomEntryModal({
   roomName,
   showJoinRoom,
   onJoinRoom,
+  showJoinRoom2D,
+  onJoinRoom2D,
   showEnterOnDevice,
   onEnterOnDevice,
   showSpectate,
@@ -44,6 +46,14 @@ export function RoomEntryModal({
               <EnterIcon />
               <span>
                 <FormattedMessage id="room-entry-modal.join-room-button" defaultMessage="Join Room" />
+              </span>
+            </Button>
+          )}
+          {showJoinRoom2D && (
+            <Button preset="accent3" onClick={onJoinRoom2D}>
+              <EnterIcon />
+              <span>
+                <FormattedMessage id="room-entry-modal.join-room-2d-button" defaultMessage="Join Room 2D" />
               </span>
             </Button>
           )}
@@ -85,6 +95,8 @@ RoomEntryModal.propTypes = {
   roomName: PropTypes.string.isRequired,
   showJoinRoom: PropTypes.bool,
   onJoinRoom: PropTypes.func,
+  showJoinRoom2D: PropTypes.bool,
+  onJoinRoom2D: PropTypes.func,
   showEnterOnDevice: PropTypes.bool,
   onEnterOnDevice: PropTypes.func,
   showSpectate: PropTypes.bool,

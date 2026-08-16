@@ -15,7 +15,7 @@ import { SoundEffectsSystem } from "./sound-effects-system";
 import { ScenePreviewCameraSystem } from "./scene-preview-camera-system";
 import { InteractionSfxSystem } from "./interaction-sfx-system";
 import { SpriteSystem } from "./sprites";
-import { CameraSystem } from "./camera-system";
+import { CameraSystem, CAMERA_MODE_TOP_DOWN } from "./camera-system";
 import { WaypointSystem } from "./waypoint-system";
 import { CharacterControllerSystem } from "./character-controller-system";
 import { waitForDOMContentLoaded } from "../utils/async-utils";
@@ -225,7 +225,11 @@ export function mainTick(xrFrame: XRFrame, renderer: WebGLRenderer, scene: Scene
   // We run this earlier in the frame so things have a chance to override properties run by animations
   hubsSystems.animationMixerSystem.tick(dt);
 
-  billboardSystem(world, hubsSystems.cameraSystem.viewingCamera);
+  billboardSystem(
+    world,
+    hubsSystems.cameraSystem.viewingCamera,
+    hubsSystems.cameraSystem.mode === CAMERA_MODE_TOP_DOWN
+  );
   particleEmitterSystem(world);
   waypointSystem(world, hubsSystems.characterController, sceneEl.is("frozen"));
   hubsSystems.characterController.tick(t, dt);

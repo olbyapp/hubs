@@ -81,6 +81,8 @@ import { SharePopoverContainer } from "./room/SharePopoverContainer";
 import { AudioPopoverButtonContainer } from "./room/AudioPopoverButtonContainer";
 import { ReactionPopoverContainer } from "./room/ReactionPopoverContainer";
 import { StatusPopoverContainer } from "./room/StatusPopoverContainer";
+import { TopDownToggleButton } from "./room/TopDownToggleButton";
+import { canUseTopDown, requestTopDownOnEntry } from "../utils/top-down-mode";
 import { SafariMicModal } from "./room/SafariMicModal";
 import { RoomSignInModalContainer } from "./auth/RoomSignInModalContainer";
 import { SignInStep } from "./auth/SignInModal";
@@ -828,10 +830,34 @@ class UIRoot extends Component {
     this.setState({ entering: false });
   };
 
-  renderEntryStartPanel = () => {
+  onJoinRoomClicked = () => {
     const { hasAcceptedProfile, hasChangedNameOrPronouns } = this.props.store.state.activity;
     const isLockedDownDemo = isLockedDownDemoRoom();
     const promptForNameAndAvatarBeforeEntry = this.props.hubIsBound ? !hasAcceptedProfile : !hasChangedNameOrPronouns;
+
+    if (isLockedDownDemo) {
+      if (this.props.forcedVREntryType?.startsWith("vr")) {
+        this.setState({ enterInVR: true }, this.onAudioReadyButton);
+        return;
+      }
+      return this.onAudioReadyButton();
+    }
+    if (promptForNameAndAvatarBeforeEntry || !this.props.forcedVREntryType) {
+      this.setState({ entering: true });
+      this.props.hubChannel.sendEnteringEvent();
+      if (promptForNameAndAvatarBeforeEntry) {
+        this.pushHistoryState("entry_step", "profile");
+      } else {
+        this.onRequestMicPermission();
+        this.pushHistoryState("entry_step", "audio");
+      }
+    } else {
+      this.handleForceEntry();
+    }
+  };
+
+  renderEntryStartPanel = () => {
+    const isLockedDownDemo = isLockedDownDemoRoom();
 
     // TODO: What does onEnteringCanceled do?
     return (
@@ -839,26 +865,13 @@ class UIRoot extends Component {
         <RoomEntryModal
           roomName={this.props.hub.name}
           showJoinRoom={!this.state.waitingOnAudio && !this.props.entryDisallowed}
-          onJoinRoom={() => {
-            if (isLockedDownDemo) {
-              if (this.props.forcedVREntryType?.startsWith("vr")) {
-                this.setState({ enterInVR: true }, this.onAudioReadyButton);
-                return;
-              }
-              return this.onAudioReadyButton();
-            }
-            if (promptForNameAndAvatarBeforeEntry || !this.props.forcedVREntryType) {
-              this.setState({ entering: true });
-              this.props.hubChannel.sendEnteringEvent();
-              if (promptForNameAndAvatarBeforeEntry) {
-                this.pushHistoryState("entry_step", "profile");
-              } else {
-                this.onRequestMicPermission();
-                this.pushHistoryState("entry_step", "audio");
-              }
-            } else {
-              this.handleForceEntry();
-            }
+          onJoinRoom={this.onJoinRoomClicked}
+          showJoinRoom2D={
+            !this.state.waitingOnAudio && !this.props.entryDisallowed && !isLockedDownDemo && canUseTopDown()
+          }
+          onJoinRoom2D={() => {
+            requestTopDownOnEntry();
+            this.onJoinRoomClicked();
           }}
           showEnterOnDevice={!this.state.waitingOnAudio && !this.props.entryDisallowed && !isThisMobileVR}
           onEnterOnDevice={() => this.attemptLink()}
@@ -1646,6 +1659,7 @@ class UIRoot extends Component {
                           />
                         )}
                         <StatusPopoverContainer />
+                        {canUseTopDown() && <TopDownToggleButton scene={this.props.scene} />}
                       </>
                     )}
                     {!isLockedDownDemo && (

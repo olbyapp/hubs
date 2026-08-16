@@ -17,6 +17,8 @@ import {
 } from "../utils/bit-utils";
 import { addComponent, defineQuery, removeComponent } from "bitecs";
 import { INSPECTABLE_FLAGS } from "../bit-systems/inspect-system";
+import { isTopDownRequestedOnEntry } from "../utils/top-down-mode";
+import { hideCeilingMeshes, restoreCeilingMeshes } from "../utils/top-down-ceiling";
 
 function getInspectableInHierarchy(eid) {
   let inspectable = findAncestorWithComponent(APP.world, Inspectable, eid);
@@ -179,6 +181,17 @@ export const CAMERA_MODE_THIRD_PERSON_NEAR = 1;
 export const CAMERA_MODE_THIRD_PERSON_FAR = 2;
 export const CAMERA_MODE_INSPECT = 3;
 export const CAMERA_MODE_SCENE_PREVIEW = 4;
+export const CAMERA_MODE_TOP_DOWN = 5;
+
+const TOP_DOWN_MIN_HEIGHT = 4;
+const TOP_DOWN_MAX_HEIGHT = 25;
+const TOP_DOWN_DEFAULT_HEIGHT = 10;
+// Raw wheel is ~0.2 per notch; 6 gives ~1.2m per notch across the 4-25m range.
+const TOP_DOWN_ZOOM_SPEED = 6;
+const CEILING_HIDE_OFFSET = 3;
+// Looking straight down with screen-up = world -Z ("north").
+const TOP_DOWN_QUAT = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+const povEuler = new THREE.Euler();
 
 const NEXT_MODES = {
   [CAMERA_MODE_FIRST_PERSON]: CAMERA_MODE_THIRD_PERSON_NEAR,
@@ -251,10 +264,26 @@ export class CameraSystem {
       }
     };
 
+    this.topDownHeight = TOP_DOWN_DEFAULT_HEIGHT;
+
     waitForDOMContentLoaded().then(() => {
       this.avatarPOV = document.getElementById("avatar-pov-node");
       this.avatarRig = document.getElementById("avatar-rig");
       this.viewingRig = document.getElementById("viewing-rig");
+
+      // Top-down is a non-VR desktop mode only.
+      AFRAME.scenes[0].addEventListener("enter-vr", () => {
+        if (this.mode === CAMERA_MODE_TOP_DOWN) {
+          this.exitTopDown();
+        }
+      });
+
+      // A scene swap replaces the meshes we hid, so redo it for the new scene.
+      AFRAME.scenes[0].addEventListener("environment-scene-loaded", () => {
+        if (this.mode === CAMERA_MODE_TOP_DOWN) {
+          this.hideCeilingForTopDown();
+        }
+      });
 
       const bg = new THREE.Mesh(
         new THREE.BoxGeometry(100, 100, 100),
@@ -271,10 +300,68 @@ export class CameraSystem {
       return;
     }
 
+    if (this.mode === CAMERA_MODE_TOP_DOWN) {
+      this.exitTopDown();
+      return;
+    }
+
     if (!enableThirdPersonMode) return;
     if (this.mode === CAMERA_MODE_SCENE_PREVIEW) return;
 
     this.mode = NEXT_MODES[this.mode] || 0;
+  }
+
+  enterTopDown() {
+    if (this.mode === CAMERA_MODE_TOP_DOWN || !this.avatarRig) return;
+    if (this.mode === CAMERA_MODE_INSPECT) {
+      this.uninspect();
+    }
+
+    this.mode = CAMERA_MODE_TOP_DOWN;
+    this.topDownHeight = TOP_DOWN_DEFAULT_HEIGHT;
+
+    // Drop any mouse-look pitch/roll, keeping yaw: the head must not stay
+    // tilted, and while flying a pitched POV would send WASD up or down.
+    // Yaw itself is squared up to north every frame in tick().
+    povEuler.setFromQuaternion(this.avatarPOV.object3D.quaternion, "YXZ");
+    povEuler.x = 0;
+    povEuler.z = 0;
+    this.avatarPOV.object3D.quaternion.setFromEuler(povEuler);
+    this.avatarPOV.object3D.matrixNeedsUpdate = true;
+
+    // From above you look at your own avatar: show the full model (the
+    // headless variant lives on the first-person-only layer).
+    this.viewingCamera.layers.enable(Layers.CAMERA_LAYER_THIRD_PERSON_ONLY);
+    this.viewingCamera.layers.disable(Layers.CAMERA_LAYER_FIRST_PERSON_ONLY);
+
+    this.hideCeilingForTopDown();
+
+    AFRAME.scenes[0].emit("top_down_mode_changed", { active: true });
+  }
+
+  hideCeilingForTopDown() {
+    this.avatarRig.object3D.updateMatrices();
+    const feetY = this.avatarRig.object3D.matrixWorld.elements[13];
+    hideCeilingMeshes(feetY + CEILING_HIDE_OFFSET);
+  }
+
+  exitTopDown() {
+    if (this.mode !== CAMERA_MODE_TOP_DOWN) return;
+
+    this.mode = CAMERA_MODE_FIRST_PERSON;
+    this.viewingCamera.layers.disable(Layers.CAMERA_LAYER_THIRD_PERSON_ONLY);
+    this.viewingCamera.layers.enable(Layers.CAMERA_LAYER_FIRST_PERSON_ONLY);
+    restoreCeilingMeshes();
+
+    AFRAME.scenes[0].emit("top_down_mode_changed", { active: false });
+  }
+
+  toggleTopDown() {
+    if (this.mode === CAMERA_MODE_TOP_DOWN) {
+      this.exitTopDown();
+    } else {
+      this.enterTopDown();
+    }
   }
 
   inspect(obj, distanceMod, fireChangeEvent = true) {
@@ -392,7 +479,12 @@ export class CameraSystem {
 
   ensureListenerIsParentedCorrectly(scene) {
     if (scene.audioListener && this.avatarPOV) {
-      if (this.mode === CAMERA_MODE_INSPECT && scene.audioListener.parent !== this.avatarPOV.object3D) {
+      // In top-down (like inspect) the listener stays on the avatar, not on the
+      // camera high above, so spatial audio keeps working at ground level.
+      if (
+        (this.mode === CAMERA_MODE_INSPECT || this.mode === CAMERA_MODE_TOP_DOWN) &&
+        scene.audioListener.parent !== this.avatarPOV.object3D
+      ) {
         this.avatarPOV.object3D.add(scene.audioListener);
       } else if (
         (this.mode === CAMERA_MODE_FIRST_PERSON ||
@@ -429,6 +521,7 @@ export class CameraSystem {
     const position = new THREE.Vector3();
     const quat = new THREE.Quaternion();
     const scale = new THREE.Vector3();
+    const povForward = new THREE.Vector3();
     let uiRoot;
     const hoveredQuery = defineQuery([HoveredRemoteRight]);
     return function tick(scene, dt) {
@@ -453,6 +546,9 @@ export class CameraSystem {
       if (!this.enteredScene && entered) {
         this.enteredScene = true;
         this.mode = CAMERA_MODE_FIRST_PERSON;
+        if (isTopDownRequestedOnEntry() && !scene.is("vr-mode")) {
+          this.enterTopDown();
+        }
       }
       this.avatarPOVRotator = this.avatarPOVRotator || this.avatarPOV.components["pitch-yaw-rotator"];
       this.viewingCameraRotator = this.viewingCameraRotator || this.viewingCamera.el.components["pitch-yaw-rotator"];
@@ -518,6 +614,39 @@ export class CameraSystem {
         setMatrixWorld(this.viewingRig.object3D, this.viewingRig.object3D.matrixWorld);
         this.avatarPOV.object3D.quaternion.copy(this.viewingCamera.quaternion);
         this.avatarPOV.object3D.matrixNeedsUpdate = true;
+      } else if (this.mode === CAMERA_MODE_TOP_DOWN) {
+        this.avatarPOVRotator.on = false;
+        this.viewingCameraRotator.on = false;
+
+        const wheel = this.userinput.get(paths.device.mouse.wheel);
+        if (wheel) {
+          this.topDownHeight = THREE.MathUtils.clamp(
+            this.topDownHeight + wheel * TOP_DOWN_ZOOM_SPEED,
+            TOP_DOWN_MIN_HEIGHT,
+            TOP_DOWN_MAX_HEIGHT
+          );
+        }
+
+        // Keep the avatar POV level and facing "north": WASD moves relative to
+        // the POV, so this keeps W = screen-up, D = screen-right. Runs every
+        // frame so waypoint travel (e.g. sitting) can't leave it rotated.
+        this.avatarPOV.object3D.updateMatrices();
+        povForward.setFromMatrixColumn(this.avatarPOV.object3D.matrixWorld, 2).negate();
+        if (povForward.x * povForward.x + povForward.z * povForward.z > 0.0001) {
+          const yawError = Math.atan2(povForward.x, -povForward.z);
+          if (Math.abs(yawError) > 0.001) {
+            scene.systems["hubs-systems"].characterController.enqueueInPlaceRotationAroundWorldUp(yawError);
+          }
+        }
+
+        this.avatarRig.object3D.updateMatrices();
+        position.setFromMatrixPosition(this.avatarRig.object3D.matrixWorld);
+        position.y += this.topDownHeight;
+        tmpMat.compose(position, TOP_DOWN_QUAT, V_ONE);
+        setMatrixWorld(this.viewingRig.object3D, tmpMat);
+        // Also pin the camera itself so leftover local rotation from earlier
+        // mouse-look on the viewing rig can't tilt the view.
+        setMatrixWorld(this.viewingCamera, tmpMat);
       } else if (this.mode === CAMERA_MODE_INSPECT) {
         this.avatarPOVRotator.on = false;
         this.viewingCameraRotator.on = false;

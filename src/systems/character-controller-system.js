@@ -14,6 +14,7 @@ import { getCurrentPlayerHeight } from "../utils/get-current-player-height";
 import qsTruthy from "../utils/qs_truthy";
 import { releaseOccupiedWaypoint } from "../bit-systems/waypoint";
 import { shouldUseNewLoader } from "../utils/bit-utils";
+import { CAMERA_MODE_TOP_DOWN } from "./camera-system";
 //import { m4String } from "../utils/pretty-print";
 const NAV_ZONE = "character";
 const qsAllowWaypointLerp = qsTruthy("waypointLerp");
@@ -243,8 +244,11 @@ export class CharacterControllerSystem {
         this.navNode = null;
       }
       const preferences = window.APP.store.state.preferences;
-      const snapRotateLeft = userinput.get(paths.actions.snapRotateLeft);
-      const snapRotateRight = userinput.get(paths.actions.snapRotateRight);
+      // In top-down mode the camera azimuth is fixed and WASD is screen-relative,
+      // so silently rotating the avatar with Q/E would only skew the controls.
+      const inTopDown = this.scene.systems["hubs-systems"].cameraSystem.mode === CAMERA_MODE_TOP_DOWN;
+      const snapRotateLeft = !inTopDown && userinput.get(paths.actions.snapRotateLeft);
+      const snapRotateRight = !inTopDown && userinput.get(paths.actions.snapRotateRight);
       if (snapRotateLeft) {
         this.dXZ += (preferences.snapRotationDegrees * Math.PI) / 180;
       }
