@@ -39,6 +39,31 @@ let loadingObject;
 const DEFAULT_PAGE_REFRESH_INTERVAL_S = 30;
 const PAGE_REFRESH_TICK_MS = 5000;
 
+// Joining a room with dozens of pinned items fired every resolve at once; the
+// burst tripped connection drops and each failure froze into a permanent
+// broken-link card. Cap how many media-loader updates run concurrently — the
+// rest wait their turn (the loading spinner is already showing meanwhile).
+const MAX_CONCURRENT_LOADS = 6;
+const pendingLoadQueue = [];
+let activeLoadCount = 0;
+
+function acquireLoadSlot() {
+  if (activeLoadCount < MAX_CONCURRENT_LOADS) {
+    activeLoadCount++;
+    return Promise.resolve();
+  }
+  return new Promise(resolve => pendingLoadQueue.push(resolve));
+}
+
+function releaseLoadSlot() {
+  const next = pendingLoadQueue.shift();
+  if (next) {
+    next();
+  } else {
+    activeLoadCount--;
+  }
+}
+
 waitForDOMContentLoaded().then(() => {
   loadModel(loadingObjectSrc).then(gltf => {
     loadingObject = gltf;
@@ -155,6 +180,11 @@ AFRAME.registerComponent("media-loader", {
     if (this._pageRefreshTimer) {
       clearInterval(this._pageRefreshTimer);
       this._pageRefreshTimer = null;
+    }
+
+    if (this._loadRetryTimeout) {
+      clearTimeout(this._loadRetryTimeout);
+      this._loadRetryTimeout = null;
     }
 
     if (this.data.linkedEl) {
@@ -441,6 +471,7 @@ AFRAME.registerComponent("media-loader", {
       this.el.removeAttribute("media-image");
     }
 
+    await acquireLoadSlot();
     try {
       if ((forceLocalRefresh || srcChanged) && !this.showLoaderTimeout) {
         this.showLoaderTimeout = setTimeout(this.showLoader, 100);
@@ -707,6 +738,8 @@ AFRAME.registerComponent("media-loader", {
       } else {
         throw new Error(`Unsupported content type: ${contentType}`);
       }
+
+      this._loadRetryCount = 0;
     } catch (e) {
       if (this.el.components["position-at-border__freeze"]) {
         this.el.setAttribute("position-at-border__freeze", { isFlat: true });
@@ -728,8 +761,23 @@ AFRAME.registerComponent("media-loader", {
         this.clearLoadingTimeout();
         return;
       }
+      // Initial load: retry with backoff before giving up — a burst of joins
+      // regularly drops a few requests, and those images DO load moments
+      // later. The loading spinner keeps spinning between attempts; the
+      // broken-link card is reserved for a load that failed all 4 tries.
+      this._loadRetryCount = (this._loadRetryCount || 0) + 1;
+      if (this._loadRetryCount <= 3 && this.el.parentNode) {
+        const delay = 1000 * Math.pow(2, this._loadRetryCount); // 2s, 4s, 8s
+        console.warn(`Media load failed (attempt ${this._loadRetryCount}/4), retrying in ${delay}ms:`, src, e);
+        this._loadRetryTimeout = setTimeout(() => {
+          if (this.el.parentNode) this.update(oldData, true);
+        }, delay);
+        return;
+      }
       console.error("Error adding media", e);
       this.onError();
+    } finally {
+      releaseLoadSlot();
     }
   }
 });

@@ -8,6 +8,19 @@ import { useTopDownActive } from "./useTopDownActive";
 
 const ROSTER_POLL_MS = 500;
 
+// Inline rather than imported: the icon set has no expand/collapse glyph.
+const ExpandIcon = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+    <path d="M1 1h6v2H3v4H1V1zm14 0v6h-2V3H9V1h6zM3 9v4h4v2H1V9h2zm12 0v6H9v-2h4V9h2z" />
+  </svg>
+);
+
+const CollapseIcon = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+    <path d="M7 1v6H1V5h4V1h2zm8 4v2H9V1h2v4h4zM7 9v6H5v-4H1V9h6zm8 0v2h-4v4H9V9h6z" />
+  </svg>
+);
+
 const tileShape = PropTypes.shape({
   key: PropTypes.string.isRequired,
   name: PropTypes.string,
@@ -16,7 +29,7 @@ const tileShape = PropTypes.shape({
   track: PropTypes.object.isRequired
 });
 
-function VideoTile({ tile, size, onClick }) {
+function VideoTile({ tile, size, onClick, onToggleFullscreen, fullscreen }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -31,7 +44,7 @@ function VideoTile({ tile, size, onClick }) {
   }, [tile.track]);
 
   return (
-    <button className={classNames(styles.tile, styles[size])} onClick={onClick} type="button">
+    <div className={classNames(styles.tile, styles[size])} onClick={onClick} role="presentation">
       {/* Muted on purpose: voice already arrives through the spatial audio mix. */}
       <video ref={videoRef} className={styles.video} muted playsInline autoPlay />
       <span className={styles.label}>
@@ -45,14 +58,29 @@ function VideoTile({ tile, size, onClick }) {
           tile.name
         )}
       </span>
-    </button>
+      {onToggleFullscreen && (
+        <button
+          className={styles.fullscreenButton}
+          type="button"
+          title={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+          onClick={event => {
+            event.stopPropagation();
+            onToggleFullscreen();
+          }}
+        >
+          {fullscreen ? <CollapseIcon /> : <ExpandIcon />}
+        </button>
+      )}
+    </div>
   );
 }
 
 VideoTile.propTypes = {
   tile: tileShape.isRequired,
   size: PropTypes.oneOf(["small", "large"]).isRequired,
-  onClick: PropTypes.func
+  onClick: PropTypes.func,
+  onToggleFullscreen: PropTypes.func,
+  fullscreen: PropTypes.bool
 };
 
 // Zoom-style video surface for the top-down view: everyone within earshot who
@@ -63,6 +91,7 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
   const [tiles, setTiles] = useState([]);
   const [spotlightKey, setSpotlightKey] = useState(null);
   const [showGrid, setShowGrid] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   // Who is nearby and who is producing both change without an event we can
   // subscribe to (avatars move every frame), so the roster is polled.
@@ -91,9 +120,15 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
     setShowGrid(false);
   }, []);
 
+  const closeSpotlight = useCallback(() => {
+    setSpotlightKey(null);
+    setFullscreen(false);
+  }, []);
+
   const toggleGrid = useCallback(() => {
     setShowGrid(grid => !grid);
     setSpotlightKey(null);
+    setFullscreen(false);
   }, []);
 
   if (!active || !tiles.length) return null;
