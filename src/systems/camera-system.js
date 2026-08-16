@@ -19,6 +19,11 @@ import { addComponent, defineQuery, removeComponent } from "bitecs";
 import { INSPECTABLE_FLAGS } from "../bit-systems/inspect-system";
 import { isTopDownRequestedOnEntry } from "../utils/top-down-mode";
 import { applyCeilingCut, removeCeilingCut } from "../utils/top-down-ceiling";
+import {
+  hideClientVideoObjects,
+  reassertHiddenClientVideoObjects,
+  restoreClientVideoObjects
+} from "../utils/top-down-media";
 
 function getInspectableInHierarchy(eid) {
   let inspectable = findAncestorWithComponent(APP.world, Inspectable, eid);
@@ -286,6 +291,17 @@ export class CameraSystem {
         }
       });
 
+      // Media spawned while 2D is already on has to be caught too. The delay is
+      // because listed-media registers an entity before its media-loader exists.
+      AFRAME.scenes[0].addEventListener("listed_media_changed", () => {
+        if (this.mode !== CAMERA_MODE_TOP_DOWN) return;
+        setTimeout(() => {
+          if (this.mode === CAMERA_MODE_TOP_DOWN) {
+            hideClientVideoObjects();
+          }
+        }, 0);
+      });
+
       // Holds the audio listener in top-down mode; see the tick for why.
       this.topDownListenerAnchor = new THREE.Object3D();
       AFRAME.scenes[0].object3D.add(this.topDownListenerAnchor);
@@ -341,6 +357,7 @@ export class CameraSystem {
     this.viewingCamera.layers.disable(Layers.CAMERA_LAYER_FIRST_PERSON_ONLY);
 
     this.hideCeilingForTopDown();
+    hideClientVideoObjects();
 
     AFRAME.scenes[0].emit("top_down_mode_changed", { active: true });
   }
@@ -358,6 +375,7 @@ export class CameraSystem {
     this.viewingCamera.layers.disable(Layers.CAMERA_LAYER_THIRD_PERSON_ONLY);
     this.viewingCamera.layers.enable(Layers.CAMERA_LAYER_FIRST_PERSON_ONLY);
     removeCeilingCut();
+    restoreClientVideoObjects();
 
     AFRAME.scenes[0].emit("top_down_mode_changed", { active: false });
   }
@@ -645,6 +663,8 @@ export class CameraSystem {
         tmpMat.compose(position, IDENTITY_QUAT, V_ONE);
         setMatrixWorld(this.topDownListenerAnchor, tmpMat);
 
+        reassertHiddenClientVideoObjects();
+
         this.avatarRig.object3D.updateMatrices();
         position.setFromMatrixPosition(this.avatarRig.object3D.matrixWorld);
         position.y += this.topDownHeight;
@@ -653,6 +673,11 @@ export class CameraSystem {
         // Also pin the camera itself so leftover local rotation from earlier
         // mouse-look on the viewing rig can't tilt the view.
         setMatrixWorld(this.viewingCamera, tmpMat);
+        // setMatrixWorld does not maintain matrixWorldInverse, and this branch
+        // writes the matrix after the tick's own updateMatrixWorld() has run.
+        // Anything testing the frustum this frame (avatar in-view checks,
+        // billboards) would otherwise use the camera's previous pose.
+        this.viewingCamera.matrixWorldInverse.copy(this.viewingCamera.matrixWorld).invert();
       } else if (this.mode === CAMERA_MODE_INSPECT) {
         this.avatarPOVRotator.on = false;
         this.viewingCameraRotator.on = false;

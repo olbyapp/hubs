@@ -80,15 +80,50 @@
   white-space: nowrap;
 }
 
+:local(.hidden) {
+  display: none;
+}
+
+:local(.fullscreen-button) {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.55);
+  color: white;
+  cursor: pointer;
+
+  &:hover {
+    background-color: rgba(0, 0, 0, 0.8);
+  }
+}
+
 // One tile promoted to the middle of the room view.
 :local(.spotlight) {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 60%;
-  height: 60%;
+  width: 72%;
+  height: 72%;
   display: flex;
+}
+
+// Same tile blown up over the whole viewport.
+:local(.spotlight):local(.fullscreen) {
+  top: 0;
+  left: 0;
+  transform: none;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.9);
 }
 
 // Everyone at once, like a Zoom gallery.

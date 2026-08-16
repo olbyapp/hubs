@@ -145,12 +145,18 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
         </div>
       ) : (
         spotlight && (
-          <div className={styles.spotlight}>
-            <VideoTile tile={spotlight} size="large" onClick={() => setSpotlightKey(null)} />
+          <div className={classNames(styles.spotlight, { [styles.fullscreen]: fullscreen })}>
+            <VideoTile
+              tile={spotlight}
+              size="large"
+              onClick={closeSpotlight}
+              fullscreen={fullscreen}
+              onToggleFullscreen={() => setFullscreen(value => !value)}
+            />
           </div>
         )
       )}
-      <div className={styles.column}>
+      <div className={classNames(styles.column, { [styles.hidden]: fullscreen })}>
         {tiles.length > 1 && (
           <button className={styles.expandButton} onClick={toggleGrid} type="button">
             {showGrid ? (

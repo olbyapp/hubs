@@ -1,6 +1,7 @@
 import { defineQuery } from "bitecs";
 import { CameraTool } from "../bit-components";
 import { waitForDOMContentLoaded } from "../utils/async-utils";
+import { CAMERA_MODE_TOP_DOWN } from "../systems/camera-system";
 const { Vector3, Quaternion, Matrix4, Euler } = THREE;
 
 function quaternionAlmostEquals(epsilon, u, v) {
@@ -181,6 +182,15 @@ AFRAME.registerComponent("ik-controller", {
     camera.object3D.updateMatrix();
 
     const hasNewCameraTransform = !this.lastCameraTransform.equals(camera.object3D.matrix);
+
+    // isInView tests a single point against the viewing camera's frustum, which
+    // is a poor proxy in top-down: the camera stares straight down at a patch of
+    // floor, so someone who just joined across the room tests as out of view and
+    // never gets the IK pass that makes their avatar appear. Everyone drawn on
+    // the 2D map counts as in view.
+    if (this.el.sceneEl.systems["hubs-systems"].cameraSystem.mode === CAMERA_MODE_TOP_DOWN) {
+      this.isInView = true;
+    }
 
     // Optimization: if the camera hasn't moved and the hips converged to the target orientation on a previous frame,
     // then the avatar does not need any IK this frame.

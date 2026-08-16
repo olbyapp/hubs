@@ -15,6 +15,7 @@ import qsTruthy from "../utils/qs_truthy";
 import { releaseOccupiedWaypoint } from "../bit-systems/waypoint";
 import { shouldUseNewLoader } from "../utils/bit-utils";
 import { CAMERA_MODE_TOP_DOWN } from "./camera-system";
+import { tickTopDownPointer, resetTopDownPointer } from "./top-down-pointer";
 //import { m4String } from "../utils/pretty-print";
 const NAV_ZONE = "character";
 const qsAllowWaypointLerp = qsTruthy("waypointLerp");
@@ -263,6 +264,12 @@ export class CharacterControllerSystem {
       }
       if (snapRotateLeft || snapRotateRight) {
         this.scene.systems["hubs-systems"].soundEffectsSystem.playSoundOneShot(SOUND_SNAP_ROTATE);
+      }
+      if (inTopDown && !preferences.disableMovement) {
+        // Adds to relativeMotion below, so it has to run before the keyboard.
+        tickTopDownPointer(this.scene, this, this.avatarRig, t);
+      } else if (!inTopDown) {
+        resetTopDownPointer();
       }
       const characterAcceleration = userinput.get(paths.actions.characterAcceleration);
       const hasCharacterAcceleration = characterAcceleration && (characterAcceleration[0] || characterAcceleration[1]);

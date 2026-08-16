@@ -1,6 +1,7 @@
 import { SOUND_TELEPORT_END, SOUND_TELEPORT_START } from "../systems/sound-effects-system";
 import { cylinderTextureSrc } from "./cylinder-texture";
 import { textureLoader } from "../utils/media-utils";
+import { CAMERA_MODE_TOP_DOWN } from "../systems/camera-system";
 
 const CYLINDER_TEXTURE = textureLoader.load(cylinderTextureSrc);
 
@@ -219,8 +220,20 @@ AFRAME.registerComponent("teleporter", {
     const { start, confirm, speed } = this.data;
     const object3D = this.el.object3D;
 
+    // Top-down has its own click-to-move, and the aiming arc is unusable from
+    // straight overhead, so the teleporter stays out of the way there.
+    const inTopDown = this.el.sceneEl.systems["hubs-systems"].cameraSystem.mode === CAMERA_MODE_TOP_DOWN;
+    if (inTopDown && this.isTeleporting) {
+      this.isTeleporting = false;
+      this.hit = false;
+      this.rayCurve.visible = false;
+      this.hitEntity.visible = false;
+      this.stopPlayingTeleportSound();
+    }
+
     if (
       !this.isTeleporting &&
+      !inTopDown &&
       userinput.get(start) &&
       !this.characterController.isTeleportingDisabled &&
       !window.APP.store.state.preferences.disableTeleporter

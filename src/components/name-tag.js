@@ -9,6 +9,8 @@ import { textureLoader } from "../utils/media-utils";
 
 import handRaisedIconSrc from "../assets/hud/hand-raised.png";
 import { STATUS_LABELS, STATUS_COLORS } from "../utils/user-status";
+import { getStatusIconTexture } from "../utils/status-icons";
+import { CAMERA_MODE_TOP_DOWN } from "../systems/camera-system";
 
 const DEBUG = qsTruthy("debug");
 const NAMETAG_BACKGROUND_PADDING = 0.05;
@@ -24,6 +26,13 @@ const NAMETAG_TEXT_Y = 0.1;
 const NAMETAG_TEXT_PRONOUN_Y = 0.125;
 const TYPING_ANIM_SPEED = 150;
 const DISPLAY_NAME_LENGTH = 18;
+const NAMETAG_STATUS_ICON_PADDING = 0.025;
+// Top-down: lie flat, top edge pointing north, matching the fixed camera.
+const NAMETAG_FACE_UP = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+// Tags are scaled by camera height over this distance, so they keep the size
+// they would have when read from a few metres away no matter how far you zoom.
+const NAMETAG_TOP_DOWN_READING_DISTANCE = 3;
+const NAMETAG_TOP_DOWN_CLEARANCE = 0.2;
 
 const ANIM_CONFIG = {
   duration: 400,
@@ -41,6 +50,9 @@ const nametagTypingGeometry = new THREE.CircleBufferGeometry(0.01, 6);
 const handRaisedTexture = textureLoader.load(handRaisedIconSrc);
 const handRaisedGeometry = createPlaneBufferGeometry(0.2, 0.2, 1, 1, handRaisedTexture.flipY);
 const handRaisedMaterial = new THREE.MeshBasicMaterial({ transparent: true, map: handRaisedTexture });
+
+// Unit square, scaled per nametag once the plate height is known.
+const statusIconGeometry = createPlaneBufferGeometry(1, 1, 1, 1, true);
 
 AFRAME.registerComponent("name-tag", {
   schema: {},
@@ -92,6 +104,17 @@ AFRAME.registerComponent("name-tag", {
     this.handRaised.matrixNeedsUpdate = true;
     this.el.object3D.add(this.handRaised);
 
+    // Status icon: fills the height of the plate at its right end, with the
+    // name and status text shifted into the space that remains on the left.
+    this.statusIconSize = 0;
+    this.textOffsetX = 0;
+    this.statusIcon = new THREE.Mesh(
+      statusIconGeometry,
+      new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false })
+    );
+    this.statusIcon.visible = false;
+    this.el.object3D.add(this.statusIcon);
+
     this.nametagVolume = new THREE.Mesh(nametagVolumeGeometry, nametagVolumeMaterial);
     this.nametagVolume.position.set(0, this.nameTagVolumeY, 0.001);
     this.nametagVolume.matrixNeedsUpdate = true;
@@ -138,6 +161,7 @@ AFRAME.registerComponent("name-tag", {
     let typingAnimTime = 0;
     const worldPos = new THREE.Vector3();
     const mat = new THREE.Matrix4();
+    const topDownScale = new THREE.Vector3();
     return function (t) {
       if (!this.isAvatarReady) {
         this.nametag.visible = false;
@@ -177,8 +201,22 @@ AFRAME.registerComponent("name-tag", {
 
         this.neck.getWorldPosition(worldPos);
         worldPos.setY(this.nametagElPosY + this.ikRoot.position.y);
-        mat.copy(this.nametag.matrixWorld);
-        mat.setPosition(worldPos);
+        const cameraSystem = this.el.sceneEl.systems["hubs-systems"].cameraSystem;
+        if (cameraSystem.mode === CAMERA_MODE_TOP_DOWN) {
+          // Set the orientation here rather than leaning on the billboard
+          // system: copying the current world matrix would inherit the avatar's
+          // yaw, which is what left names upside down as people turned around.
+          // The scale keeps the tag the same size on screen at any zoom.
+          const scale = cameraSystem.topDownHeight / NAMETAG_TOP_DOWN_READING_DISTANCE;
+          topDownScale.setScalar(scale);
+          // A tag this large would blanket the avatar from overhead, so park it
+          // north of the head — which reads as just above them on screen.
+          worldPos.z -= (this.nameTagHeight / 2 + NAMETAG_TOP_DOWN_CLEARANCE) * scale;
+          mat.compose(worldPos, NAMETAG_FACE_UP, topDownScale);
+        } else {
+          mat.copy(this.nametag.matrixWorld);
+          mat.setPosition(worldPos);
+        }
         setMatrixWorld(this.nametag, mat);
       } else {
         this.nametag.visible = false;
@@ -261,8 +299,10 @@ AFRAME.registerComponent("name-tag", {
       this.nametagIdentityName.el.setAttribute("text", { value: this.identityName });
     }
 
-    this.nametagText.position.set(0, this.nameTagTextY, 0.001);
+    this.nametagText.position.set(this.textOffsetX, this.nameTagTextY, 0.001);
     this.nametagText.matrixNeedsUpdate = true;
+    this.pronounsText.position.set(this.textOffsetX, this.pronounsText.position.y, 0.001);
+    this.pronounsText.matrixNeedsUpdate = true;
   },
 
   updateStatus() {
@@ -278,8 +318,17 @@ AFRAME.registerComponent("name-tag", {
       this.prevStatusLabel = label;
     }
     // Shares the pronouns line unless pronouns are set, then sits below them.
-    this.statusText.position.set(0, this.pronouns ? -0.09 : 0, 0.001);
+    this.statusText.position.set(this.textOffsetX, this.pronouns ? -0.09 : 0, 0.001);
     this.statusText.matrixNeedsUpdate = true;
+
+    const texture = getStatusIconTexture(this.status);
+    this.statusIcon.visible = !!texture;
+    if (texture) {
+      this.statusIcon.material.map = texture;
+      this.statusIcon.material.needsUpdate = true;
+      this.statusIcon.scale.setScalar(this.statusIconSize);
+      this.statusIcon.matrixNeedsUpdate = true;
+    }
   },
 
   updatePronouns() {
@@ -329,6 +378,10 @@ AFRAME.registerComponent("name-tag", {
       this.nameTagTextY = NAMETAG_TEXT_Y;
     }
 
+    // Work out the icon and the room it takes from the text before laying out.
+    this.statusIconSize = getStatusIconTexture(this.status) ? this.nameTagHeight - NAMETAG_STATUS_ICON_PADDING * 2 : 0;
+    this.textOffsetX = -this.statusIconSize / 2;
+
     this.updateAvatarModelAABB();
     const tmpVector = new THREE.Vector3();
     this.nametagHeight =
@@ -370,14 +423,19 @@ AFRAME.registerComponent("name-tag", {
   },
 
   resizeNameTag() {
+    const width = this.size.x + NAMETAG_BACKGROUND_PADDING * 2 + this.statusIconSize;
     this.nametagBackground.el.setAttribute("slice9", {
-      width: this.size.x + NAMETAG_BACKGROUND_PADDING * 2,
+      width,
       height: this.nameTagHeight
     });
     this.nametagStatusBorder.el.setAttribute("slice9", {
-      width: this.size.x + NAMETAG_BACKGROUND_PADDING * 2 + NAMETAG_STATUS_BORDER_PADDING,
+      width: width + NAMETAG_STATUS_BORDER_PADDING,
       height: this.nameTagHeight + NAMETAG_STATUS_BORDER_PADDING
     });
+    if (this.statusIconSize) {
+      this.statusIcon.position.set(width / 2 - this.statusIconSize / 2 - NAMETAG_STATUS_ICON_PADDING, 0, 0.002);
+      this.statusIcon.matrixNeedsUpdate = true;
+    }
   },
 
   updateHandRaised() {
