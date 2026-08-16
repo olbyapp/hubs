@@ -12,6 +12,32 @@ const inflightTextures = new Map();
 
 const errorCacheItem = { texture: errorTexture, ratio: 1400 / 1200 };
 
+// Cap concurrent texture DOWNLOADS. Joining a room with dozens of pinned
+// photos fired them all at once; on real-world connections part of the burst
+// died with net::ERR_CONNECTION_CLOSED and froze into broken-link cards
+// (the media-loader-level cap only paces the cheap resolve requests — the
+// heavy downloads start here).
+const MAX_CONCURRENT_TEXTURE_LOADS = 4;
+const textureLoadQueue = [];
+let activeTextureLoads = 0;
+
+function acquireTextureSlot() {
+  if (activeTextureLoads < MAX_CONCURRENT_TEXTURE_LOADS) {
+    activeTextureLoads++;
+    return Promise.resolve();
+  }
+  return new Promise(resolve => textureLoadQueue.push(resolve));
+}
+
+function releaseTextureSlot() {
+  const next = textureLoadQueue.shift();
+  if (next) {
+    next();
+  } else {
+    activeTextureLoads--;
+  }
+}
+
 AFRAME.registerComponent("media-image", {
   schema: {
     src: { type: "string" },
@@ -27,6 +53,10 @@ AFRAME.registerComponent("media-image", {
   },
 
   remove() {
+    if (this._selfHealTimeout) {
+      clearTimeout(this._selfHealTimeout);
+      this._selfHealTimeout = null;
+    }
     if (this._retainedKey) {
       textureCache.release(this._retainedKey.src, this._retainedKey.version);
       this._retainedKey = null;
@@ -77,15 +107,26 @@ AFRAME.registerComponent("media-image", {
             }
             throw new Error(`Unknown image content type: ${contentType}`);
           };
-          // vegamix: one retry absorbs transient net::ERR_CONNECTION_CLOSED
-          // from proxy keep-alive races on /files responses.
+          // vegamix: up to 4 attempts with backoff — transient connection
+          // drops under a join burst must not become permanent failures. The
+          // download slot is held only during the actual transfer, not the
+          // backoff sleeps.
           const promise = (async () => {
-            try {
-              return await loadTexture();
-            } catch (e) {
-              await new Promise(resolve => setTimeout(resolve, 1500));
-              return await loadTexture();
+            let lastError;
+            for (let attempt = 0; attempt < 4; attempt++) {
+              if (attempt > 0) {
+                await new Promise(resolve => setTimeout(resolve, 1500 * Math.pow(2, attempt - 1)));
+              }
+              await acquireTextureSlot();
+              try {
+                return await loadTexture();
+              } catch (e) {
+                lastError = e;
+              } finally {
+                releaseTextureSlot();
+              }
             }
+            throw lastError;
           })();
           inflightTextures.set(inflightKey, promise);
           try {
@@ -111,6 +152,7 @@ AFRAME.registerComponent("media-image", {
 
       this._retainedKey = src === "error" ? null : { src, version };
       this.currentSrcIsRetained = !!this._retainedKey;
+      this._selfHealCount = 0;
     } catch (e) {
       console.error("Error loading image", this.data.src, e);
       // vegamix: if we are already showing a real texture, keep it — swapping
@@ -124,6 +166,20 @@ AFRAME.registerComponent("media-image", {
       texture = errorTexture;
       this._retainedKey = null;
       this.currentSrcIsRetained = false;
+
+      // Last line of defense: silently re-attempt the whole load twice more
+      // (15s / 30s) — previously the error card was final and only a page
+      // reload could bring the image back.
+      this._selfHealCount = (this._selfHealCount || 0) + 1;
+      if (this._selfHealCount <= 2) {
+        const failedSrc = this.data.src;
+        const failedVersion = this.data.version;
+        this._selfHealTimeout = setTimeout(() => {
+          if (this.el.parentNode && this.data.src === failedSrc && this.data.version === failedVersion) {
+            this.update(oldData);
+          }
+        }, 15000 * this._selfHealCount);
+      }
     }
 
     // Release the previously shown texture now that its replacement is in hand.
