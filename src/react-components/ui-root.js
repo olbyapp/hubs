@@ -82,6 +82,7 @@ import { AudioPopoverButtonContainer } from "./room/AudioPopoverButtonContainer"
 import { ReactionPopoverContainer } from "./room/ReactionPopoverContainer";
 import { StatusPopoverContainer } from "./room/StatusPopoverContainer";
 import { TopDownToggleButton } from "./room/TopDownToggleButton";
+import { VideoTilesPanel } from "./room/VideoTilesPanel";
 import { canUseTopDown, requestTopDownOnEntry } from "../utils/top-down-mode";
 import { SafariMicModal } from "./room/SafariMicModal";
 import { RoomSignInModalContainer } from "./auth/RoomSignInModalContainer";
@@ -1422,6 +1423,13 @@ class UIRoot extends Component {
                 viewport={
                   <>
                     {!this.state.dialog && renderEntryFlow ? entryDialog : undefined}
+                    {entered && canUseTopDown() && (
+                      <VideoTilesPanel
+                        scene={this.props.scene}
+                        presences={this.props.presences}
+                        sessionId={this.props.sessionId}
+                      />
+                    )}
                     {!this.props.selectedObject && <CompactMoreMenuButton />}
                     {(!this.props.selectedObject ||
                       (this.props.breakpoint !== "sm" && this.props.breakpoint !== "md")) && (

@@ -1,9 +1,14 @@
 import { computeLocalBoundingBox } from "../utils/auto-box-collider.js";
 import { setMatrixWorld } from "../utils/three-utils";
+import { CAMERA_MODE_TOP_DOWN } from "../systems/camera-system";
 
 const MIN_SCALE = 0.05;
 const MAX_SCALE = 4;
 const ROTATE_Y = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+// Lies the menu flat with its top edge pointing north, matching how the
+// top-down camera frames the room.
+const FACE_UP = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+const TOP_DOWN_MENU_CLEARANCE = 0.15;
 
 const updateFromLocalBB = (function () {
   const currentPosition = new THREE.Vector3();
@@ -123,6 +128,7 @@ AFRAME.registerComponent("position-at-border", {
     const currentMeshScale = new THREE.Vector3();
     const meshForward = new THREE.Vector3();
     const boxCorners = new THREE.Vector3();
+    const topDownLift = new THREE.Vector3();
     return function tick2() {
       if (!this.didInit) {
         this.doInit();
@@ -205,6 +211,15 @@ AFRAME.registerComponent("position-at-border", {
         centerToCamera.normalize().multiplyScalar(meshSphereRadius);
         desiredCenterPoint.copy(this.meshCenter).add(centerToCamera);
       }
+      const inTopDown = this.el.sceneEl.systems["hubs-systems"].cameraSystem.mode === CAMERA_MODE_TOP_DOWN;
+      if (inTopDown) {
+        // Every placement above puts the menu on the viewer's side of the
+        // object, which from directly overhead means inside it or edge-on.
+        // Float it over the object instead; the rotation below lays it flat.
+        desiredCenterPoint
+          .copy(this.meshCenter)
+          .add(topDownLift.set(0, this.meshHalfExtents.y + TOP_DOWN_MENU_CLEARANCE, 0));
+      }
       if (this.data.scale) {
         const distanceToCenter = centerToCamera.subVectors(cameraPosition, desiredCenterPoint).length();
         desiredTargetScale.setScalar(THREE.MathUtils.clamp(0.45 * distanceToCenter, MIN_SCALE, MAX_SCALE));
@@ -219,6 +234,8 @@ AFRAME.registerComponent("position-at-border", {
               .divide(currentTargetScale.setFromMatrixScale(this.target.matrixWorld))
               .multiply(desiredTargetScale)
           );
+      } else if (inTopDown) {
+        desiredTargetPosition.copy(desiredCenterPoint);
       } else {
         desiredTargetPosition.copy(this.meshCenter).add(
           centerToBorder
@@ -227,7 +244,9 @@ AFRAME.registerComponent("position-at-border", {
             .applyMatrix4(currentMeshRotation)
         );
       }
-      if (this.data.isFlat) {
+      if (inTopDown) {
+        desiredTargetQuaternion.copy(FACE_UP);
+      } else if (this.data.isFlat) {
         desiredTargetQuaternion.setFromRotationMatrix(currentMeshRotation);
         if (needsYRotate) {
           desiredTargetQuaternion.multiply(ROTATE_Y);

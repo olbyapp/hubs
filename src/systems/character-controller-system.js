@@ -164,6 +164,12 @@ export class CharacterControllerSystem {
     const startTranslation = new THREE.Matrix4();
     const waypointPosition = new THREE.Vector3();
     const v = new THREE.Vector3();
+    const povZAxis = new THREE.Vector3();
+    // Identity rotation: in top-down, WASD is read in world axes instead of
+    // relative to the avatar, so the keys stay tied to the screen while the
+    // avatar is free to turn.
+    const SCREEN_ALIGNED_POV = new THREE.Matrix4();
+    const TOP_DOWN_TURN_RATE = 12; // rad/s, ~180 degrees in a quarter second
 
     let uiRoot;
     return function tick(t, dt) {
@@ -291,7 +297,7 @@ export class CharacterControllerSystem {
         if (triedToMove) {
           const speedModifier = preferences.movementSpeedModifier;
           calculateDisplacementToDesiredPOV(
-            snapRotatedPOV,
+            inTopDown ? SCREEN_ALIGNED_POV : snapRotatedPOV,
             this.fly || !navMeshExists,
             this.relativeMotion.multiplyScalar(
               ((userinput.get(paths.actions.boost) ? 2 : 1) *
@@ -307,6 +313,22 @@ export class CharacterControllerSystem {
           newPOV
             .makeTranslation(displacementToDesiredPOV.x, displacementToDesiredPOV.y, displacementToDesiredPOV.z)
             .multiply(snapRotatedPOV);
+
+          if (inTopDown) {
+            // Turn the avatar to face where it is walking. Movement itself is
+            // screen-aligned above, so facing is free to follow the step.
+            const dx = displacementToDesiredPOV.x;
+            const dz = displacementToDesiredPOV.z;
+            if (dx * dx + dz * dz > 0.0000001) {
+              povZAxis.setFromMatrixColumn(newPOV, 2);
+              const currentYaw = Math.atan2(povZAxis.x, povZAxis.z);
+              const desiredYaw = Math.atan2(-dx, -dz);
+              const turn = desiredYaw - currentYaw;
+              const shortestTurn = Math.atan2(Math.sin(turn), Math.cos(turn));
+              const maxTurn = (TOP_DOWN_TURN_RATE * dt) / 1000;
+              rotateInPlaceAroundWorldUp(newPOV, THREE.MathUtils.clamp(shortestTurn, -maxTurn, maxTurn), newPOV);
+            }
+          }
         }
 
         const shouldRecomputeNavGroupAndNavNode = didStopFlying || this.shouldLandWhenPossible;

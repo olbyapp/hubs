@@ -18,7 +18,7 @@ import {
 import { addComponent, defineQuery, removeComponent } from "bitecs";
 import { INSPECTABLE_FLAGS } from "../bit-systems/inspect-system";
 import { isTopDownRequestedOnEntry } from "../utils/top-down-mode";
-import { hideCeilingMeshes, restoreCeilingMeshes } from "../utils/top-down-ceiling";
+import { applyCeilingCut, removeCeilingCut } from "../utils/top-down-ceiling";
 
 function getInspectableInHierarchy(eid) {
   let inspectable = findAncestorWithComponent(APP.world, Inspectable, eid);
@@ -191,6 +191,7 @@ const TOP_DOWN_ZOOM_SPEED = 6;
 const CEILING_HIDE_OFFSET = 3;
 // Looking straight down with screen-up = world -Z ("north").
 const TOP_DOWN_QUAT = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+const IDENTITY_QUAT = new THREE.Quaternion();
 const povEuler = new THREE.Euler();
 
 const NEXT_MODES = {
@@ -285,6 +286,11 @@ export class CameraSystem {
         }
       });
 
+      // Holds the audio listener in top-down mode; see the tick for why.
+      this.topDownListenerAnchor = new THREE.Object3D();
+      AFRAME.scenes[0].object3D.add(this.topDownListenerAnchor);
+      this.topDownListenerAnchor.applyMatrix4(IDENTITY);
+
       const bg = new THREE.Mesh(
         new THREE.BoxGeometry(100, 100, 100),
         new THREE.MeshBasicMaterial({ color: 0x020202, side: THREE.BackSide })
@@ -342,7 +348,7 @@ export class CameraSystem {
   hideCeilingForTopDown() {
     this.avatarRig.object3D.updateMatrices();
     const feetY = this.avatarRig.object3D.matrixWorld.elements[13];
-    hideCeilingMeshes(feetY + CEILING_HIDE_OFFSET);
+    applyCeilingCut(feetY + CEILING_HIDE_OFFSET);
   }
 
   exitTopDown() {
@@ -351,7 +357,7 @@ export class CameraSystem {
     this.mode = CAMERA_MODE_FIRST_PERSON;
     this.viewingCamera.layers.disable(Layers.CAMERA_LAYER_THIRD_PERSON_ONLY);
     this.viewingCamera.layers.enable(Layers.CAMERA_LAYER_FIRST_PERSON_ONLY);
-    restoreCeilingMeshes();
+    removeCeilingCut();
 
     AFRAME.scenes[0].emit("top_down_mode_changed", { active: false });
   }
@@ -479,12 +485,16 @@ export class CameraSystem {
 
   ensureListenerIsParentedCorrectly(scene) {
     if (scene.audioListener && this.avatarPOV) {
-      // In top-down (like inspect) the listener stays on the avatar, not on the
-      // camera high above, so spatial audio keeps working at ground level.
+      // Top-down keeps the listener at avatar height but on a level,
+      // north-facing anchor, so left/right in the mix matches left/right on
+      // screen no matter which way the avatar turns.
       if (
-        (this.mode === CAMERA_MODE_INSPECT || this.mode === CAMERA_MODE_TOP_DOWN) &&
-        scene.audioListener.parent !== this.avatarPOV.object3D
+        this.mode === CAMERA_MODE_TOP_DOWN &&
+        this.topDownListenerAnchor &&
+        scene.audioListener.parent !== this.topDownListenerAnchor
       ) {
+        this.topDownListenerAnchor.add(scene.audioListener);
+      } else if (this.mode === CAMERA_MODE_INSPECT && scene.audioListener.parent !== this.avatarPOV.object3D) {
         this.avatarPOV.object3D.add(scene.audioListener);
       } else if (
         (this.mode === CAMERA_MODE_FIRST_PERSON ||
@@ -521,7 +531,6 @@ export class CameraSystem {
     const position = new THREE.Vector3();
     const quat = new THREE.Quaternion();
     const scale = new THREE.Vector3();
-    const povForward = new THREE.Vector3();
     let uiRoot;
     const hoveredQuery = defineQuery([HoveredRemoteRight]);
     return function tick(scene, dt) {
@@ -627,17 +636,14 @@ export class CameraSystem {
           );
         }
 
-        // Keep the avatar POV level and facing "north": WASD moves relative to
-        // the POV, so this keeps W = screen-up, D = screen-right. Runs every
-        // frame so waypoint travel (e.g. sitting) can't leave it rotated.
+        // The avatar turns to face where it walks, so the listener cannot ride
+        // on it without rotating the stereo field away from the screen. Park it
+        // on an anchor at head height that stays level and north-facing, which
+        // is exactly how the fixed camera frames the room.
         this.avatarPOV.object3D.updateMatrices();
-        povForward.setFromMatrixColumn(this.avatarPOV.object3D.matrixWorld, 2).negate();
-        if (povForward.x * povForward.x + povForward.z * povForward.z > 0.0001) {
-          const yawError = Math.atan2(povForward.x, -povForward.z);
-          if (Math.abs(yawError) > 0.001) {
-            scene.systems["hubs-systems"].characterController.enqueueInPlaceRotationAroundWorldUp(yawError);
-          }
-        }
+        position.setFromMatrixPosition(this.avatarPOV.object3D.matrixWorld);
+        tmpMat.compose(position, IDENTITY_QUAT, V_ONE);
+        setMatrixWorld(this.topDownListenerAnchor, tmpMat);
 
         this.avatarRig.object3D.updateMatrices();
         position.setFromMatrixPosition(this.avatarRig.object3D.matrixWorld);
