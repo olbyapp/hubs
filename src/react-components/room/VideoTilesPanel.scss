@@ -86,13 +86,13 @@
 
 :local(.fullscreen-button) {
   position: absolute;
-  top: 6px;
+  bottom: 6px;
   right: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 29px;
+  height: 29px;
   padding: 0;
   border: none;
   border-radius: 6px;

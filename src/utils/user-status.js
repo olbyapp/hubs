@@ -7,7 +7,7 @@ export const USER_STATUSES = ["none", "work", "eat", "thinking", "afk"];
 
 // Shown on nametags. Keep ASCII — the MSDF nametag font has no emoji glyphs.
 export const STATUS_LABELS = {
-  none: null,
+  none: "ONLINE",
   work: "WORK",
   eat: "EAT",
   thinking: "THINKING",

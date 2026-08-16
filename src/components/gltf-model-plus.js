@@ -1020,6 +1020,22 @@ export function cloneModelFromCache(src) {
  * @param {boolean} [useCache]
  * @param {null|(json:any)=>any} [jsonPreprocessor]
  */
+// A socket that stalls mid-transfer leaves a THREE loader promise pending
+// forever — no rejection, so nothing retries and no error surfaces. Turning the
+// stall into a rejection lets the inflight entry be evicted and the next
+// request start a fresh download.
+const MODEL_LOAD_TIMEOUT_MS = 45000;
+
+function withLoadTimeout(promise, src) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timed out loading model ${src}`)), MODEL_LOAD_TIMEOUT_MS);
+    })
+  ]).finally(() => clearTimeout(timer));
+}
+
 export async function loadModel(src, contentType = null, useCache = false, jsonPreprocessor = null) {
   console.log(`Loading model ${src}`);
   if (useCache) {
@@ -1032,12 +1048,21 @@ export async function loadModel(src, contentType = null, useCache = false, jsonP
         gltfCache.retain(src);
         return cloneGltf(gltf);
       } else {
-        const promise = loadGLTF(src, contentType, null, jsonPreprocessor);
+        const promise = withLoadTimeout(loadGLTF(src, contentType, null, jsonPreprocessor), src);
         inflightGltfs.set(src, promise);
-        const gltf = await promise;
-        inflightGltfs.delete(src);
-        gltfCache.set(src, gltf);
-        return cloneGltf(gltf);
+        try {
+          const gltf = await promise;
+          gltfCache.set(src, gltf);
+          return cloneGltf(gltf);
+        } finally {
+          // vegamix: stock code deleted the inflight entry only on success, so
+          // one dropped download poisoned this src for the rest of the session
+          // — every later request awaited the same dead promise. That is how an
+          // avatar could stay invisible to one client until it reloaded, while
+          // everyone else saw it fine. Same bug we already fixed for textures
+          // in media-image.js.
+          inflightGltfs.delete(src);
+        }
       }
     }
   } else {
@@ -1192,6 +1217,10 @@ AFRAME.registerComponent("gltf-model-plus", {
       this.el.emit("model-loaded", { format: "gltf", model: object3DToSet });
     } catch (e) {
       gltfCache.release(src);
+      // Clear lastSrc so setting the same src again actually retries; otherwise
+      // the guard at the top of this function turns every retry into a no-op
+      // and the entity is stuck with no model for good.
+      this.lastSrc = null;
       console.error("Failed to load glTF model", e, this);
       this.el.emit("model-error", { format: "gltf", src });
     }

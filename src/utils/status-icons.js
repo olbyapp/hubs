@@ -4,6 +4,7 @@ import { STATUS_COLORS } from "./user-status";
 // the nametag font is MSDF and has no emoji glyphs, and a canvas keeps the icon
 // and its colour ring in one place with no new binaries in the repo.
 const STATUS_GLYPHS = {
+  none: "🙂",
   work: "💼",
   eat: "🍔",
   thinking: "💭",

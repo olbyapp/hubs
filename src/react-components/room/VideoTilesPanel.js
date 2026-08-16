@@ -10,13 +10,13 @@ const ROSTER_POLL_MS = 500;
 
 // Inline rather than imported: the icon set has no expand/collapse glyph.
 const ExpandIcon = () => (
-  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
     <path d="M1 1h6v2H3v4H1V1zm14 0v6h-2V3H9V1h6zM3 9v4h4v2H1V9h2zm12 0v6H9v-2h4V9h2z" />
   </svg>
 );
 
 const CollapseIcon = () => (
-  <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+  <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
     <path d="M7 1v6H1V5h4V1h2zm8 4v2H9V1h2v4h4zM7 9v6H5v-4H1V9h6zm8 0v2h-4v4H9V9h6z" />
   </svg>
 );

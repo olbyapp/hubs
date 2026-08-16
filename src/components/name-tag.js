@@ -61,7 +61,7 @@ AFRAME.registerComponent("name-tag", {
     this.displayName = null;
     this.pronouns = null;
     this.identityName = null;
-    this.status = null;
+    this.status = "none";
     this.isTalking = false;
     this.isTyping = false;
     this.isOwner = false;
@@ -90,6 +90,9 @@ AFRAME.registerComponent("name-tag", {
     this.updateElements = this.updateElements.bind(this);
 
     this.nametag = this.el.object3D;
+    // Tells the billboard system to keep its hands off in top-down: the tick
+    // below composes this tag's whole transform there.
+    this.nametag.userData.ownsTopDownOrientation = true;
     this.nametagIdentityName = this.el.querySelector(".identityName").object3D;
     this.nametagBackground = this.el.querySelector(".nametag-background").object3D;
     this.nametagStatusBorder = this.el.querySelector(".nametag-status-border").object3D;
@@ -258,7 +261,9 @@ AFRAME.registerComponent("name-tag", {
     this.displayName = presenceMeta.profile.displayName;
     this.pronouns = presenceMeta.profile.pronouns;
     this.identityName = presenceMeta.profile.identityName;
-    this.status = presenceMeta.profile.status || null;
+    // Everyone carries a status now, including those who never opened the
+    // picker, so the plate always has a label and an icon.
+    this.status = presenceMeta.profile.status || "none";
     this.isRecording = !!(presenceMeta.streaming || presenceMeta.recording);
     this.isOwner = !!(presenceMeta.roles && presenceMeta.roles.owner);
     this.isTyping = !!presenceMeta.typing;

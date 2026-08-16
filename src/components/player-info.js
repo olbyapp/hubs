@@ -200,8 +200,10 @@ AFRAME.registerComponent("player-info", {
   },
 
   handleRemoteModelError() {
-    this.data.avatarSrc = defaultAvatar;
-    this.applyProperties();
+    // Has to go through setAttribute: writing this.data directly leaves the
+    // failing URL in the component's attrValue, and the next presence sync
+    // rebuilds data from it and puts the broken avatar back.
+    this.el.setAttribute("player-info", { avatarSrc: defaultAvatar });
   },
 
   onMicStateChanged({ enabled }) {

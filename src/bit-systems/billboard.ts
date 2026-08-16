@@ -57,6 +57,11 @@ const updateBillboard = (world: HubsWorld, billboard: number, camera: Camera, to
 
   if (Billboard.onlyY[billboard]) {
     if (topDown) {
+      // Name tags build their own transform in top-down (orientation, scale and
+      // an offset off the head). Writing a rotation here too would fight them,
+      // and whichever ran last won — which is how tags ended up yawed with the
+      // avatar despite name-tag.js laying them flat.
+      if (object3D.userData.ownsTopDownOrientation) return;
       // Yaw-only billboards are seen edge-on from above; lay them flat instead.
       if (object3D.parent) {
         object3D.parent.updateMatrices();
