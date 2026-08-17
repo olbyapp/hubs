@@ -17,6 +17,39 @@ import { forEachMaterial } from "./material-utils";
 const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
 const clipPlanes = [clipPlane];
 
+// The cut used to sit a fixed 3m above the avatar's feet. Since the plane keeps
+// what is BELOW it, that quietly did nothing in a room whose ceiling is lower
+// than 3m: the ceiling stayed and 2D looked straight at it. Every metre of the
+// threshold therefore has to be below the real ceiling — so look up from the
+// avatar and put the plane just under whatever is overhead.
+//
+// The ray starts above head height, which ignores desks and shelves for free,
+// and searches far enough up to find the ceiling of a hall rather than settling
+// for a conservative slice. When it finds nothing (open sky, or a ceiling whose
+// faces point away from the room and so are invisible to a ray) the fallback has
+// to be low enough to clear any real ceiling — cutting a bit more wall than
+// necessary costs a top-down view nothing, leaving the ceiling on ruins it.
+const CUT_MIN_OFFSET = 2;
+const CUT_SEARCH_DISTANCE = 8;
+const CUT_CLEARANCE = 0.05;
+
+const UP = new THREE.Vector3(0, 1, 0);
+const ceilingRaycaster = new THREE.Raycaster();
+const rayOrigin = new THREE.Vector3();
+
+export function findCeilingCutY(feetPosition) {
+  const environmentScene = document.querySelector("#environment-scene");
+  rayOrigin.set(feetPosition.x, feetPosition.y + CUT_MIN_OFFSET, feetPosition.z);
+  if (!environmentScene) return rayOrigin.y;
+
+  ceilingRaycaster.set(rayOrigin, UP);
+  ceilingRaycaster.far = CUT_SEARCH_DISTANCE;
+  const overhead = ceilingRaycaster.intersectObject(environmentScene.object3D, true)[0];
+  if (!overhead) return rayOrigin.y;
+
+  return Math.max(rayOrigin.y, rayOrigin.y + overhead.distance - CUT_CLEARANCE);
+}
+
 // material -> the clippingPlanes it had before we touched it.
 const patchedMaterials = new Map();
 

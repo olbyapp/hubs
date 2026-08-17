@@ -18,12 +18,8 @@ import {
 import { addComponent, defineQuery, removeComponent } from "bitecs";
 import { INSPECTABLE_FLAGS } from "../bit-systems/inspect-system";
 import { isTopDownRequestedOnEntry } from "../utils/top-down-mode";
-import { applyCeilingCut, removeCeilingCut } from "../utils/top-down-ceiling";
-import {
-  hideClientVideoObjects,
-  reassertHiddenClientVideoObjects,
-  restoreClientVideoObjects
-} from "../utils/top-down-media";
+import { applyCeilingCut, findCeilingCutY, removeCeilingCut } from "../utils/top-down-ceiling";
+import { hideClientVideoObjects, restoreClientVideoObjects } from "../utils/top-down-media";
 
 function getInspectableInHierarchy(eid) {
   let inspectable = findAncestorWithComponent(APP.world, Inspectable, eid);
@@ -193,7 +189,8 @@ const TOP_DOWN_MAX_HEIGHT = 25;
 const TOP_DOWN_DEFAULT_HEIGHT = 10;
 // Raw wheel is ~0.2 per notch; 6 gives ~1.2m per notch across the 4-25m range.
 const TOP_DOWN_ZOOM_SPEED = 6;
-const CEILING_HIDE_OFFSET = 3;
+// Where the ceiling cut goes is worked out per room; see top-down-ceiling.
+const avatarFeet = new THREE.Vector3();
 // Looking straight down with screen-up = world -Z ("north").
 const TOP_DOWN_QUAT = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
 const IDENTITY_QUAT = new THREE.Quaternion();
@@ -291,16 +288,9 @@ export class CameraSystem {
         }
       });
 
-      // Media spawned while 2D is already on has to be caught too. The delay is
-      // because listed-media registers an entity before its media-loader exists.
-      AFRAME.scenes[0].addEventListener("listed_media_changed", () => {
-        if (this.mode !== CAMERA_MODE_TOP_DOWN) return;
-        setTimeout(() => {
-          if (this.mode === CAMERA_MODE_TOP_DOWN) {
-            hideClientVideoObjects();
-          }
-        }, 0);
-      });
+      // (Quads spawned while 2D is on need no event of their own: the tick
+      // reconciles the roster every frame, which also covers listed-media
+      // registering an entity before its media-loader exists.)
 
       // Holds the audio listener in top-down mode; see the tick for why.
       this.topDownListenerAnchor = new THREE.Object3D();
@@ -364,8 +354,8 @@ export class CameraSystem {
 
   hideCeilingForTopDown() {
     this.avatarRig.object3D.updateMatrices();
-    const feetY = this.avatarRig.object3D.matrixWorld.elements[13];
-    applyCeilingCut(feetY + CEILING_HIDE_OFFSET);
+    avatarFeet.setFromMatrixPosition(this.avatarRig.object3D.matrixWorld);
+    applyCeilingCut(findCeilingCutY(avatarFeet));
   }
 
   exitTopDown() {
@@ -617,6 +607,15 @@ export class CameraSystem {
 
       this.ensureListenerIsParentedCorrectly(scene);
 
+      if (this.mode !== CAMERA_MODE_TOP_DOWN) {
+        // Reconciled here rather than only in exitTopDown: the mode can be left
+        // without going through it (the lobby ghost view forces first person,
+        // inspect swaps the mode out from under us), and the quads would then
+        // stay hidden for the rest of the session — invisible screenshares in
+        // 3D. No-op once nothing is hidden.
+        restoreClientVideoObjects();
+      }
+
       if (this.mode === CAMERA_MODE_FIRST_PERSON) {
         this.viewingCameraRotator.on = false;
         this.avatarRig.object3D.updateMatrices();
@@ -663,7 +662,9 @@ export class CameraSystem {
         tmpMat.compose(position, IDENTITY_QUAT, V_ONE);
         setMatrixWorld(this.topDownListenerAnchor, tmpMat);
 
-        reassertHiddenClientVideoObjects();
+        // Reconcile rather than only re-assert: this also picks up quads spawned
+        // while 2D is on and re-hides after a restore triggered by inspect.
+        hideClientVideoObjects();
 
         this.avatarRig.object3D.updateMatrices();
         position.setFromMatrixPosition(this.avatarRig.object3D.matrixWorld);
