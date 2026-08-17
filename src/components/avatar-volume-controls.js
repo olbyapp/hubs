@@ -1,6 +1,7 @@
 import { updateAudioSettings } from "../update-audio-settings";
 import { VOLUME_LABELS } from "./media-video";
 import { findAncestorWithComponent } from "../utils/scene-graph";
+import { readsFromTopDownCamera } from "../bit-systems/billboard";
 import {
   calcLevel,
   calcGainStepDown,
@@ -13,6 +14,9 @@ import {
 
 AFRAME.registerComponent("avatar-volume-controls", {
   init() {
+    // These buttons are a few pixels tall seen from the 2D view's camera, so let
+    // the billboard system lay the menu flat and scale it with the zoom.
+    readsFromTopDownCamera(this.el.object3D);
     this.volumeUp = this.volumeUp.bind(this);
     this.volumeDown = this.volumeDown.bind(this);
     this.volumeUpButton = this.el.querySelector(".avatar-volume-up-button");

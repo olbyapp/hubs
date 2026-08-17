@@ -1,21 +1,27 @@
 @use "../styles/theme.scss";
 
 // These blocks are direct children of the room viewport, which grants them
-// pointer-events: auto — so each one is sized to its content and positioned
-// explicitly, never full-bleed, or it would swallow clicks meant for the scene.
-:local(.column) {
+// pointer-events: auto — and the column reserves the full height of the view, so
+// it has to hand clicks back to the scene (the tiles inside take their own).
+// The doubled selector is there to outrank the viewport's `> *` rule.
+:local(.column):local(.column) {
   position: absolute;
   top: 8px;
   left: 8px;
+  height: calc(100% - 16px);
   display: flex;
-  flex-direction: column;
+  // Wrapping into a second column keeps tiles recognisable when there are more
+  // people than can fit at the smallest size; nothing ever scrolls out of sight.
+  flex-flow: column wrap;
+  justify-content: flex-start;
+  align-content: flex-start;
   gap: 8px;
-  max-height: calc(100% - 16px);
-  overflow-y: auto;
+  pointer-events: none;
 
   @media (min-width: theme.$breakpoint-lg) {
     top: 24px;
     left: 24px;
+    height: calc(100% - 48px);
   }
 }
 
@@ -45,14 +51,18 @@
   background-color: black;
   cursor: pointer;
   display: block;
+  // Tiles are sized to fit their container, so they must not be squeezed further.
+  flex: 0 0 auto;
 }
 
-:local(.small) {
+// Fallback size only: both the column and the gallery measure their box and pass
+// the width (and, in the gallery, the height) that makes the tiles fit.
+:local(.fixed) {
   width: 160px;
   aspect-ratio: 16 / 9;
 }
 
-:local(.large) {
+:local(.fill) {
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -80,7 +90,9 @@
   white-space: nowrap;
 }
 
-:local(.hidden) {
+// Doubled, and after .column on purpose: it has to outrank the display: flex of
+// the block it hides.
+:local(.hidden):local(.hidden) {
   display: none;
 }
 
@@ -126,17 +138,19 @@
   background-color: rgba(0, 0, 0, 0.9);
 }
 
-// Everyone at once, like a Zoom gallery.
-:local(.grid) {
+// Everyone at once, like a Zoom gallery. Tiles arrive already sized to the
+// largest 16:9 box that fits the count, so this only has to centre them.
+:local(.grid):local(.grid) {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   width: 72%;
   height: 72%;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  grid-auto-rows: 1fr;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: center;
   gap: 8px;
-  place-content: center;
+  pointer-events: none;
 }

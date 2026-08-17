@@ -11,6 +11,7 @@ import handRaisedIconSrc from "../assets/hud/hand-raised.png";
 import { STATUS_LABELS, STATUS_COLORS } from "../utils/user-status";
 import { getStatusIconTexture } from "../utils/status-icons";
 import { CAMERA_MODE_TOP_DOWN } from "../systems/camera-system";
+import { TOP_DOWN_READING_DISTANCE } from "../utils/top-down-mode";
 
 const DEBUG = qsTruthy("debug");
 const NAMETAG_BACKGROUND_PADDING = 0.05;
@@ -29,10 +30,8 @@ const DISPLAY_NAME_LENGTH = 18;
 const NAMETAG_STATUS_ICON_PADDING = 0.025;
 // Top-down: lie flat, top edge pointing north, matching the fixed camera.
 const NAMETAG_FACE_UP = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
-// Tags are scaled by camera height over this distance, so they keep the size
-// they would have when read from a few metres away no matter how far you zoom.
-const NAMETAG_TOP_DOWN_READING_DISTANCE = 3;
 const NAMETAG_TOP_DOWN_CLEARANCE = 0.2;
+const V_ONE = new THREE.Vector3(1, 1, 1);
 
 const ANIM_CONFIG = {
   duration: 400,
@@ -165,6 +164,8 @@ AFRAME.registerComponent("name-tag", {
     const worldPos = new THREE.Vector3();
     const mat = new THREE.Matrix4();
     const topDownScale = new THREE.Vector3();
+    const tagQuat = new THREE.Quaternion();
+    const ignoredVec = new THREE.Vector3();
     return function (t) {
       if (!this.isAvatarReady) {
         this.nametag.visible = false;
@@ -210,15 +211,18 @@ AFRAME.registerComponent("name-tag", {
           // system: copying the current world matrix would inherit the avatar's
           // yaw, which is what left names upside down as people turned around.
           // The scale keeps the tag the same size on screen at any zoom.
-          const scale = cameraSystem.topDownHeight / NAMETAG_TOP_DOWN_READING_DISTANCE;
+          const scale = cameraSystem.topDownHeight / TOP_DOWN_READING_DISTANCE;
           topDownScale.setScalar(scale);
           // A tag this large would blanket the avatar from overhead, so park it
           // north of the head — which reads as just above them on screen.
           worldPos.z -= (this.nameTagHeight / 2 + NAMETAG_TOP_DOWN_CLEARANCE) * scale;
           mat.compose(worldPos, NAMETAG_FACE_UP, topDownScale);
         } else {
-          mat.copy(this.nametag.matrixWorld);
-          mat.setPosition(worldPos);
+          // Take the billboard's rotation but drop everything else: copying the
+          // whole matrix carried the top-down zoom scale back into 3D, which is
+          // what left every tag giant after a trip through the 2D view.
+          this.nametag.matrixWorld.decompose(ignoredVec, tagQuat, ignoredVec);
+          mat.compose(worldPos, tagQuat, V_ONE);
         }
         setMatrixWorld(this.nametag, mat);
       } else {

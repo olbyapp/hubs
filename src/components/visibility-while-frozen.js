@@ -67,6 +67,20 @@ AFRAME.registerComponent("visibility-while-frozen", {
     this.updateVisibility();
   },
 
+  // The cursor reports the innermost hover target it hit, which for an avatar is
+  // the small collider box inside the hovered element, and for a menu is one of
+  // its own buttons. Comparing against the hoverable itself therefore never
+  // matched on avatars — the reason their menus had to be shown for everyone.
+  isHoverableHovered() {
+    if (!this.hoverable) return false;
+    const { rightRemote, leftRemote } = this.el.sceneEl.systems.interaction.state;
+    return this.isInsideHoverable(rightRemote.hovered) || this.isInsideHoverable(leftRemote.hovered);
+  },
+
+  isInsideHoverable(hovered) {
+    return !!hovered && (hovered === this.hoverable || this.hoverable.contains(hovered));
+  },
+
   updateVisibility() {
     if (!this.cameraEl) return;
     const isFrozen = this.el.sceneEl.is("frozen");
@@ -116,12 +130,7 @@ AFRAME.registerComponent("visibility-while-frozen", {
       !isHoldingAnything;
 
     if (this.data.requireHoverOnNonMobile && !isMobile) {
-      shouldBeVisible =
-        shouldBeVisible &&
-        ((this.hoverable &&
-          (this.el.sceneEl.systems.interaction.state.rightRemote.hovered === this.hoverable ||
-            this.el.sceneEl.systems.interaction.state.leftRemote.hovered === this.hoverable)) ||
-          isVisible);
+      shouldBeVisible = shouldBeVisible && (this.isHoverableHovered() || isVisible);
     }
 
     if (!this.data.visibleIfOwned) {

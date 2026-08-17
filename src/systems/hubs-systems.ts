@@ -233,7 +233,8 @@ export function mainTick(xrFrame: XRFrame, renderer: WebGLRenderer, scene: Scene
   billboardSystem(
     world,
     hubsSystems.cameraSystem.viewingCamera,
-    hubsSystems.cameraSystem.mode === CAMERA_MODE_TOP_DOWN
+    hubsSystems.cameraSystem.mode === CAMERA_MODE_TOP_DOWN,
+    hubsSystems.cameraSystem.topDownHeight
   );
   particleEmitterSystem(world);
   waypointSystem(world, hubsSystems.characterController, sceneEl.is("frozen"));

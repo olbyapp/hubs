@@ -148,8 +148,10 @@
                                     position="0 -0.025 0.13"></a-entity>
                                 <a-entity tags="ignoreSpaceBubble: true;" class="interactable ui interactable-ui"
                                     layers="mask: 768; recursive: true;">
+                                    <!-- Hover is required (as it is for media menus): holding space used to
+                                         light up the volume and call buttons on everyone in the room at once. -->
                                     <a-entity billboard="onlyY: true;" class="freeze-menu"
-                                        visibility-while-frozen="withinDistance: 100; requireHoverOnNonMobile: false;"
+                                        visibility-while-frozen="withinDistance: 100;"
                                         avatar-volume-controls>
                                         <a-entity class="avatar-volume-label"
                                             text="value: 0%; anchorX: center; textAlign: center; color: #ff3464; letterSpacing: 0.08;"

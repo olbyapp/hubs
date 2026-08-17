@@ -2,6 +2,8 @@ import { defineQuery } from "bitecs";
 import { Box3, Euler, Frustum, Matrix4, Quaternion, Vector3, Object3D, Camera, Mesh } from "three";
 import { HubsWorld } from "../app";
 import { Billboard } from "../bit-components";
+import { setMatrixWorld } from "../utils/three-utils";
+import { TOP_DOWN_MENU_READING_DISTANCE } from "../utils/top-down-mode";
 
 const billboardQuery = defineQuery([Billboard]);
 
@@ -50,8 +52,71 @@ const shouldUpdateBillboard = (world: HubsWorld, billboard: number, camera: Came
 const FACE_UP_QUAT = new Quaternion().setFromEuler(new Euler(-Math.PI / 2, 0, 0));
 const parentQuat = new Quaternion();
 
-const updateBillboard = (world: HubsWorld, billboard: number, camera: Camera, topDown: boolean) => {
+// A menu scaled for reading from overhead is taller than the avatar it belongs
+// to, so it is hung "south" of them (screen-down): that keeps it clear of the
+// name tag, which sits north of the head, and keeps its buttons — one of which
+// blocks the person — out from under a cursor that is only pointing at them.
+const TOP_DOWN_MENU_SOUTH_OFFSET = 0.6;
+const menuMatrix = new Matrix4();
+const menuPos = new Vector3();
+const menuScale = new Vector3();
+
+// In-world menus are authored in metres for someone standing next to them, so
+// from a camera 10-25m up they are a few unreadable pixels. Opt in here and the
+// whole menu is laid flat and blown up around its owner, keeping every button
+// where it was relative to them. See utils/top-down-mode for the scale.
+export function readsFromTopDownCamera(object3D: Object3D) {
+  object3D.userData.readsFromTopDownCamera = true;
+}
+
+const applyTopDownReadingTransform = (object3D: Object3D, topDownHeight: number) => {
+  const parent = object3D.parent;
+  if (!parent) return;
+  if (!object3D.userData.topDownSavedLocalTransform) {
+    object3D.userData.topDownSavedLocalTransform = {
+      position: object3D.position.clone(),
+      scale: object3D.scale.clone()
+    };
+  }
+  // Taken from the parent rather than from this object's own world matrix: that
+  // matrix already carries last frame's offset, which would compound every frame.
+  parent.updateMatrices();
+  menuPos.setFromMatrixPosition(parent.matrixWorld);
+  const scale = topDownHeight / TOP_DOWN_MENU_READING_DISTANCE;
+  menuPos.z += TOP_DOWN_MENU_SOUTH_OFFSET * scale;
+  menuScale.setScalar(scale);
+  menuMatrix.compose(menuPos, FACE_UP_QUAT, menuScale);
+  setMatrixWorld(object3D, menuMatrix);
+};
+
+// Leaving 2D has to put the local transform back, or the menu keeps the zoom
+// scale and the offset it was given up there.
+const clearTopDownReadingTransform = (object3D: Object3D) => {
+  const saved = object3D.userData.topDownSavedLocalTransform;
+  if (!saved) return;
+  object3D.position.copy(saved.position);
+  object3D.scale.copy(saved.scale);
+  object3D.matrixNeedsUpdate = true;
+  object3D.userData.topDownSavedLocalTransform = null;
+};
+
+const updateBillboard = (
+  world: HubsWorld,
+  billboard: number,
+  camera: Camera,
+  topDown: boolean,
+  topDownHeight: number
+) => {
   const object3D = world.eid2obj.get(billboard)!;
+
+  if (object3D.userData.readsFromTopDownCamera) {
+    if (topDown) {
+      applyTopDownReadingTransform(object3D, topDownHeight);
+      return;
+    }
+    clearTopDownReadingTransform(object3D);
+  }
+
   // Set the camera world position as the target.
   targetPos.setFromMatrixPosition(camera.matrixWorld);
 
@@ -85,7 +150,7 @@ let nextBillboard = 0;
 
 // Billboard component that only updates visible objects and only those in the camera view on mobile VR.
 // TODO billboarding assumes a single camera viewpoint but with video-texture-source, mirrors, and camera tools this is no longer valid
-export function billboardSystem(world: HubsWorld, camera: Camera, topDown: boolean = false) {
+export function billboardSystem(world: HubsWorld, camera: Camera, topDown: boolean = false, topDownHeight: number = 0) {
   const billboards = billboardQuery(world);
   if (!billboards.length) return;
   if (isThisMobileVR) {
@@ -93,8 +158,9 @@ export function billboardSystem(world: HubsWorld, camera: Camera, topDown: boole
       nextBillboard = 0;
     }
     const billboard = billboards[nextBillboard++];
-    shouldUpdateBillboard(world, billboard, camera) && updateBillboard(world, billboard, camera, topDown);
+    shouldUpdateBillboard(world, billboard, camera) &&
+      updateBillboard(world, billboard, camera, topDown, topDownHeight);
   } else {
-    billboards.forEach(billboard => updateBillboard(world, billboard, camera, topDown));
+    billboards.forEach(billboard => updateBillboard(world, billboard, camera, topDown, topDownHeight));
   }
 }
