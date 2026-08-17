@@ -5,10 +5,14 @@ import { FormattedMessage } from "react-intl";
 // ResizeObserver not currently supported in Firefox Android
 import ResizeObserver from "resize-observer-polyfill";
 import styles from "./VideoTilesPanel.scss";
-import { collectVideoTiles, sameTiles } from "../../utils/video-tiles";
+import { collectTalkingSessions, collectVideoTiles, sameSessions, sameTiles } from "../../utils/video-tiles";
 import { useTopDownActive } from "./useTopDownActive";
 
 const ROSTER_POLL_MS = 500;
+// Who is speaking is polled far more often than the roster: half a second of lag
+// is nothing when someone joins, but it is very visible on a speaking indicator.
+const TALKING_POLL_MS = 150;
+const NOBODY_TALKING = new Set();
 
 // Tiles are laid out in script rather than by the grid/flex algorithms alone:
 // both the column and the gallery have a fixed box to fill and a tile count that
@@ -67,7 +71,7 @@ function useElementSize(node) {
   return size;
 }
 
-function VideoTile({ tile, size, style, onClick, onToggleFullscreen, fullscreen }) {
+function VideoTile({ tile, size, style, talking, onClick, onToggleFullscreen, fullscreen }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
@@ -82,7 +86,12 @@ function VideoTile({ tile, size, style, onClick, onToggleFullscreen, fullscreen 
   }, [tile.track]);
 
   return (
-    <div className={classNames(styles.tile, styles[size])} style={style} onClick={onClick} role="presentation">
+    <div
+      className={classNames(styles.tile, styles[size], { [styles.talking]: talking })}
+      style={style}
+      onClick={onClick}
+      role="presentation"
+    >
       {/* Muted on purpose: voice already arrives through the spatial audio mix. */}
       <video ref={videoRef} className={styles.video} muted playsInline autoPlay />
       <span className={styles.label}>
@@ -118,6 +127,7 @@ VideoTile.propTypes = {
   // "fixed" takes the size given to it, "fill" takes the size of its container.
   size: PropTypes.oneOf(["fixed", "fill"]).isRequired,
   style: PropTypes.object,
+  talking: PropTypes.bool,
   onClick: PropTypes.func,
   onToggleFullscreen: PropTypes.func,
   fullscreen: PropTypes.bool
@@ -166,6 +176,7 @@ function galleryTileWidth(count, width, height) {
 export function VideoTilesPanel({ scene, presences, sessionId }) {
   const topDown = useTopDownActive(scene);
   const [tiles, setTiles] = useState([]);
+  const [talking, setTalking] = useState(NOBODY_TALKING);
   const [spotlightKey, setSpotlightKey] = useState(null);
   const [showGrid, setShowGrid] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -185,11 +196,36 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
     return () => clearInterval(interval);
   }, [presences, sessionId]);
 
+  useEffect(() => {
+    const update = () => {
+      const next = collectTalkingSessions(sessionId);
+      setTalking(prev => (sameSessions(prev, next) ? prev : next));
+    };
+    update();
+    const interval = setInterval(update, TALKING_POLL_MS);
+    return () => clearInterval(interval);
+  }, [sessionId]);
+
   const spotlight = useMemo(() => tiles.find(tile => tile.key === spotlightKey) || null, [tiles, spotlightKey]);
   const listed = useMemo(
     () => (spotlight ? tiles.filter(tile => tile.key !== spotlight.key) : tiles),
     [tiles, spotlight]
   );
+
+  // The tile being watched can vanish underneath the viewer: the person stops
+  // sharing, or walks out of earshot. Fullscreen hides the strip, so a flag left
+  // standing for a tile that no longer exists blanks the whole panel — including
+  // every tile that shows up afterwards.
+  useEffect(() => {
+    if (spotlightKey && !tiles.some(tile => tile.key === spotlightKey)) {
+      setSpotlightKey(null);
+      setFullscreen(false);
+    }
+  }, [tiles, spotlightKey]);
+
+  // Belt and braces for the same failure: whatever the state says, there is
+  // nothing to be fullscreen about without a spotlit tile.
+  const fullscreenActive = fullscreen && !!spotlight;
 
   const stripSize = useElementSize(stripNode);
   const buttonSize = useElementSize(buttonNode);
@@ -241,25 +277,27 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
               tile={tile}
               size="fixed"
               style={gridTileStyle}
+              talking={talking.has(tile.sessionId)}
               onClick={() => openInCentre(tile.key)}
             />
           ))}
         </div>
       ) : (
         spotlight && (
-          <div className={classNames(styles.spotlight, { [styles.fullscreen]: fullscreen })}>
+          <div className={classNames(styles.spotlight, { [styles.fullscreen]: fullscreenActive })}>
             <VideoTile
               tile={spotlight}
               size="fill"
+              talking={talking.has(spotlight.sessionId)}
               onClick={closeSpotlight}
-              fullscreen={fullscreen}
+              fullscreen={fullscreenActive}
               onToggleFullscreen={() => setFullscreen(value => !value)}
             />
           </div>
         )
       )}
       <div
-        className={classNames(topDown ? styles.column : styles.row, { [styles.hidden]: fullscreen })}
+        className={classNames(topDown ? styles.column : styles.row, { [styles.hidden]: fullscreenActive })}
         ref={setStripNode}
       >
         {tiles.length > 1 && (
@@ -278,6 +316,7 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
               tile={tile}
               size="fixed"
               style={stripTileStyle}
+              talking={talking.has(tile.sessionId)}
               onClick={() => openInCentre(tile.key)}
             />
           ))}

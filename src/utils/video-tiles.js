@@ -88,3 +88,45 @@ export function sameTiles(a, b) {
   }
   return true;
 }
+
+// Remote avatars carry a debounced "is talking" flag, the same one the in-world
+// name tag lights its border with, so tiles and name tags agree on who is
+// speaking. Your own avatar has no analyser — nobody consumes your voice back —
+// so the local mic level is read instead and held for the same beat, otherwise
+// your own tile would strobe between words.
+const LOCAL_TALKING_HOLD_MS = 1000;
+const LOCAL_TALKING_VOLUME = 0.01;
+let localTalkingUntil = 0;
+
+export function collectTalkingSessions(mySessionId) {
+  const talking = new Set();
+
+  const analysers = (APP.componentRegistry && APP.componentRegistry["networked-audio-analyser"]) || [];
+  for (const analyser of analysers) {
+    if (analyser.avatarIsTalking && analyser.playerSessionId) {
+      talking.add(analyser.playerSessionId);
+    }
+  }
+
+  const scene = AFRAME.scenes[0];
+  const localAnalyser = scene && scene.systems["local-audio-analyser"];
+  if (localAnalyser) {
+    const now = performance.now();
+    if (localAnalyser.volume > LOCAL_TALKING_VOLUME) {
+      localTalkingUntil = now + LOCAL_TALKING_HOLD_MS;
+    }
+    if (now < localTalkingUntil && mySessionId) {
+      talking.add(mySessionId);
+    }
+  }
+
+  return talking;
+}
+
+export function sameSessions(a, b) {
+  if (a.size !== b.size) return false;
+  for (const sessionId of a) {
+    if (!b.has(sessionId)) return false;
+  }
+  return true;
+}

@@ -78,6 +78,14 @@
   flex: 0 0 auto;
 }
 
+// Speaking: the same green the in-world name tag lights its border with, so the
+// two indicators read as one signal. Drawn as a ring outside the border rather
+// than a thicker border, which would resize the tile and reflow the strip.
+:local(.talking) {
+  border-color: theme.$green;
+  box-shadow: 0 0 0 3px theme.$green;
+}
+
 // Fallback size only: both the column and the gallery measure their box and pass
 // the width (and, in the gallery, the height) that makes the tiles fit.
 :local(.fixed) {
