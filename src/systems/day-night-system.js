@@ -42,6 +42,25 @@ const config = {
   latitude: 55.7558,
   longitude: 37.6173,
 
+  // Что делать с направленным светом сцены. Роль у него бывает разная, и угадать её
+  // из GLB нельзя, поэтому выбираем руками:
+  //   "fill"     — свет поставлен как заливка (например, светит в окна, чтобы в офисе
+  //                было светло). Направление не трогаем вообще, только гасим к ночи.
+  //                Отдельного солнца нет: цикл идут небо, экспозиция, лампы, луна.
+  //   "add"      — то же, но сверху добавляем СВОЁ солнце: оно едет по небу и даёт
+  //                движущиеся тени, а авторская заливка остаётся на месте.
+  //   "takeover" — свет сцены и есть солнце, разворачиваем его самого. Годится, только
+  //                если автор ставил его именно как солнце.
+  sunMode: "fill",
+  // Пиковая интенсивность своего солнца в режиме "add". null — взять интенсивность
+  // самого яркого направленного света сцены и умножить на ownSunIntensityFactor.
+  ownSunIntensity: null,
+  ownSunIntensityFactor: 0.6,
+  // Во сколько раз приглушается направленный свет сцены в глухую ночь.
+  sceneFillNightFactor: 0.25,
+  // Насколько подмешивать закатную теплоту в авторский цвет заливки (0 — не трогать).
+  sceneFillWarmTint: 0,
+
   // Высота солнца (градусы), между которыми разгорается дневной свет.
   dayStart: -6,
   dayEnd: 8,
@@ -150,6 +169,7 @@ const sunDirection = new Vector3();
 const lightDirection = new Vector3();
 const tmpColorA = new Color();
 const tmpColorB = new Color();
+const sunColor = new Color();
 
 export class DayNightSystem {
   constructor(sceneEl) {
@@ -182,10 +202,19 @@ export class DayNightSystem {
     this.moon.target = this.moonTarget;
     this.nightAmbient = new AmbientLight(0xffffff, 0);
     this.nightAmbient.name = "day-night-ambient";
+    this.ownSun = new DirectionalLight(0xffffff, 0);
+    this.ownSun.name = "day-night-sun";
+    this.ownSunTarget = new Object3D();
+    this.ownSunTarget.name = "day-night-sun-target";
+    this.ownSun.target = this.ownSunTarget;
+    this.ownSun.shadow.mapSize.set(2048, 2048);
+    this.ownSun.shadow.bias = -0.0005;
     // Вешаем на корень сцены, а не в environment-scene: смена сцены не должна их уносить.
     this.scene.add(this.moon);
     this.scene.add(this.moonTarget);
     this.scene.add(this.nightAmbient);
+    this.scene.add(this.ownSun);
+    this.scene.add(this.ownSunTarget);
 
     this.applyQueryStringOverrides();
 
@@ -309,7 +338,7 @@ export class DayNightSystem {
     const warmth = 1 - smoothstep(0, config.warmthEnd * DEG, altitude);
 
     this.applySky(warmth);
-    this.applySun(sunUp, warmth);
+    this.applySun(day, sunUp, warmth);
     this.applyMoon(night);
     this.applyLamps(night);
     this.applyExposureAndFog(day);
@@ -336,21 +365,71 @@ export class DayNightSystem {
     // Гасить небо вручную не нужно: ниже горизонта модель Пришема темнеет сама.
   }
 
-  applySun(sunUp, warmth) {
-    if (!this.sun) return;
-    const { light, intensity } = this.sun;
-    light.intensity = intensity * sunUp;
+  /** Режим с поправкой на то, что заливать нечего, если направленного света в сцене нет. */
+  effectiveSunMode() {
+    if (!this.sun && config.sunMode === "fill") return "add";
+    return config.sunMode;
+  }
+
+  applySun(day, sunUp, warmth) {
+    const mode = this.effectiveSunMode();
     tmpColorA.set(config.sunZenithColor);
     tmpColorB.set(config.sunHorizonColor);
-    light.color.lerpColors(tmpColorA, tmpColorB, warmth).convertSRGBToLinear();
+    sunColor.lerpColors(tmpColorA, tmpColorB, warmth);
 
-    lightDirection.copy(sunDirection).negate();
+    if (mode === "takeover" && this.sun) {
+      this.setOwnSunIntensity(0);
+      const { light, intensity } = this.sun;
+      light.intensity = intensity * sunUp;
+      light.color.copy(sunColor).convertSRGBToLinear();
+      this.aimDirectionalLight(light, lightDirection.copy(sunDirection).negate());
+      return;
+    }
+
+    // Заливку разворачивать нельзя — автор навёл её на окна, а не на солнце. Гасим к
+    // ночи и по желанию чуть подмешиваем закатную теплоту, направление не трогаем.
+    if (this.sun) {
+      const { light, intensity, color } = this.sun;
+      light.intensity = intensity * (config.sceneFillNightFactor + (1 - config.sceneFillNightFactor) * day);
+      if (config.sceneFillWarmTint > 0) {
+        tmpColorA.copy(color).convertLinearToSRGB();
+        tmpColorB.copy(sunColor);
+        light.color.lerpColors(tmpColorA, tmpColorB, config.sceneFillWarmTint * warmth).convertSRGBToLinear();
+      } else {
+        light.color.copy(color);
+      }
+    }
+
+    if (mode !== "add") {
+      this.setOwnSunIntensity(0);
+      return;
+    }
+
+    const peak = config.ownSunIntensity ?? (this.sun ? this.sun.intensity : 3) * config.ownSunIntensityFactor;
+    this.setOwnSunIntensity(peak * sunUp);
+    if (this.ownSun.intensity <= 0) return;
+    this.ownSun.color.copy(sunColor).convertSRGBToLinear();
+    this.ownSun.position.copy(sunDirection).multiplyScalar(100);
+    this.ownSun.matrixNeedsUpdate = true;
+    this.ownSunTarget.position.set(0, 0, 0);
+    this.ownSunTarget.matrixNeedsUpdate = true;
+  }
+
+  // castShadow меняет число теневых источников, а значит и шейдерные программы —
+  // трогаем флаг только когда он действительно меняется.
+  setOwnSunIntensity(intensity) {
+    this.ownSun.intensity = intensity;
+    const castShadow = intensity > 0;
+    if (this.ownSun.castShadow !== castShadow) this.ownSun.castShadow = castShadow;
+  }
+
+  aimDirectionalLight(light, travelDirection) {
     if (light.target && light.target.parent === light) {
-      aimAlongWorldDirection(light, lightDirection);
+      aimAlongWorldDirection(light, travelDirection);
     } else {
       // Свет не из inflateDirectionalLight: target живёт отдельно, значит направление
       // задаём парой позиций, а не поворотом.
-      light.position.copy(lightDirection).multiplyScalar(-100);
+      light.position.copy(travelDirection).multiplyScalar(-100);
       light.matrixNeedsUpdate = true;
       light.target.position.set(0, 0, 0);
       light.target.matrixNeedsUpdate = true;
@@ -453,6 +532,7 @@ export class DayNightSystem {
 
     this.moon.intensity = 0;
     this.nightAmbient.intensity = 0;
+    this.setOwnSunIntensity(0);
     this.renderer.toneMappingExposure = this.baseExposure;
     if (this.scene.fog && this.baseFogColor) this.scene.fog.color.copy(this.baseFogColor);
 
@@ -506,7 +586,9 @@ export class DayNightSystem {
       azimuth: +((azimuth / DEG + 180) % 360).toFixed(2),
       phase: this.phase,
       enabled: this.enabled,
-      sun: this.sun ? this.sun.light.name || "(без имени)" : null,
+      sunMode: this.effectiveSunMode(),
+      sceneLight: this.sun ? this.sun.light.name || "(без имени)" : null,
+      sky: !!this.environmentSystem?.skybox,
       lamps: this.lamps.length,
       fills: this.fills.length
     };
