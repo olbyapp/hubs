@@ -12,6 +12,7 @@ import { paths } from "../systems/userinput/paths";
 import { sets } from "../systems/userinput/sets";
 import { getLastWorldPosition } from "../utils/three-utils";
 import { Layers } from "../camera-layers";
+import { isFreePlacementMode } from "../systems/placement-snap-system";
 
 export function findRemoteHoverTarget(world, object3D) {
   if (!object3D) return null;
@@ -28,6 +29,10 @@ const HIGHLIGHT = new THREE.Color(23 / 255, 64 / 255, 118 / 255);
 const NO_HIGHLIGHT = new THREE.Color(190 / 255, 190 / 255, 190 / 255);
 const TRANSFORM_COLOR_1 = new THREE.Color(150 / 255, 80 / 255, 150 / 255);
 const TRANSFORM_COLOR_2 = new THREE.Color(23 / 255, 64 / 255, 118 / 255);
+// Янтарный курсор = включён режим свободного размещения (Alt). Держим его
+// постоянно, а не только с объектом в руке: иначе непонятно, в каком ты режиме,
+// пока ничего не несёшь. Тот же цвет, что у призрака в свободном режиме.
+const FREE_PLACEMENT_COLOR = new THREE.Color(242 / 255, 153 / 255, 74 / 255);
 AFRAME.registerComponent("cursor-controller", {
   schema: {
     cursor: { type: "selector" },
@@ -207,6 +212,8 @@ AFRAME.registerComponent("cursor-controller", {
           (!left && transformObjectSystem.hand.el.id === "player-right-controller"))
       ) {
         this.color.copy(TRANSFORM_COLOR_1).lerpHSL(TRANSFORM_COLOR_2, 0.5 + 0.5 * Math.sin(t / 1000.0));
+      } else if (isFreePlacementMode()) {
+        this.color.copy(FREE_PLACEMENT_COLOR);
       } else if (isGrabbing || isHoveringSomething) {
         this.color.copy(HIGHLIGHT);
       } else {

@@ -33,8 +33,9 @@ import { paths } from "./userinput/paths";
 // записи никто не перетирает. После отпускания объект остаётся kinematic и
 // висит там, где его оставили.
 //
-// Зажатый Alt отключает прилипание и возвращает старое поведение: объект на
-// дистанции вдоль луча, лицом к игроку, глубина колесом.
+// Alt переключает режим свободного размещения и держит его до следующего Alt:
+// объект висит на дистанции вдоль луча, лицом к игроку, глубина колесом. Режим
+// виден по цвету — янтарный курсор и янтарный контур вместо синего.
 //
 // Фича видна только администратору инстанса, см. utils/experimental-features.
 
@@ -54,11 +55,13 @@ const SMOOTHING_RATE = 25;
 // Медиа в Hubs центрируется по началу координат загрузчика, но у пустой или ещё
 // не загруженной сущности бокс вырожден — тогда берём заведомо безопасный минимум.
 const MIN_HALF_EXTENT = 0.005;
-// Зажатый Alt временно отключает прилипание. Без такого клапана snap превращается
-// в тюрьму: повесить объект посреди комнаты становится невозможно.
-const BYPASS_KEY = paths.device.keyboard.key("alt");
-// Пределы ручной дистанции в режиме байпаса, как у cursor-controller.
+// Пределы ручной дистанции в свободном режиме, как у cursor-controller.
 const MIN_FREE_DISTANCE = 0.5;
+
+// Цвет призрака кодирует режим: синий — прилипание (тот же, что у курсора),
+// янтарный — свободное размещение.
+const SNAP_COLOR = 0x2f80ed;
+const FREE_COLOR = 0xf2994a;
 
 const snapQuery = defineQuery([SnapPlacing]);
 const snapEnterQuery = enterQuery(snapQuery);
@@ -95,10 +98,59 @@ const targetQuaternion = new THREE.Quaternion();
 const targetMatrix = new THREE.Matrix4();
 const cameraPosition = new THREE.Vector3();
 const towardsViewer = new THREE.Vector3();
+const ghostCenter = new THREE.Vector3();
 const ghostCorner = new THREE.Vector3();
 
 let environmentRoot = null;
 let ghost = null;
+
+// Режим свободного размещения: переключается Alt и держится до следующего Alt.
+//
+// Раньше Alt читался как зажатая клавиша через userinput, и это не работало:
+// при нажатии Alt браузер уводит фокус в меню окна, прилетает window blur, а
+// KeyboardDevice на blur делает `this.keys = {}` и `seenKeys.clear()`. После
+// этого путь /device/keyboard/alt перестаёт попадать во фрейм, читается как
+// undefined — и прилипание возвращалось прямо под зажатым Alt.
+//
+// Поэтому слушаем клавишу сами: состояние живёт здесь и от чистки ввода не
+// зависит, а preventDefault не даёт браузеру забрать фокус в меню.
+let freePlacementMode = false;
+let keyListenerAttached = false;
+
+export function isFreePlacementMode() {
+  return snapPlacementEnabled() && freePlacementMode;
+}
+
+function isTypingTarget(el) {
+  if (!el) return false;
+  return ["INPUT", "TEXTAREA"].includes(el.nodeName) || el.contentEditable === "true";
+}
+
+function announceMode() {
+  APP.messageDispatch?.receive({
+    type: "chat",
+    name: "System",
+    body: freePlacementMode
+      ? "Свободное размещение включено (Alt) — объект не прилипает к поверхностям"
+      : "Прилипание к поверхностям включено (Alt)",
+    sent: false
+  });
+}
+
+function ensureKeyListener() {
+  if (keyListenerAttached) return;
+  keyListenerAttached = true;
+  // keydown, а не keyup: в Firefox меню окна открывается именно по keyup, и
+  // отменять надо более раннее событие. repeat отсекаем — модификаторы шлют
+  // keydown повторно, пока их держат, и режим мигал бы каждый повтор.
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Alt" || event.repeat) return;
+    if (!snapPlacementEnabled() || isTypingTarget(document.activeElement)) return;
+    event.preventDefault();
+    freePlacementMode = !freePlacementMode;
+    announceMode();
+  });
+}
 
 /**
  * Медиа, которое имеет смысл прижимать к поверхности. Игрушки и прочие
@@ -255,7 +307,7 @@ function ensureGhost(sceneEl) {
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(5 * 2 * 3), 3));
   ghost = new THREE.LineSegments(
     geometry,
-    new THREE.LineBasicMaterial({ color: 0x2f80ed, depthTest: false, transparent: true, opacity: 0.9 })
+    new THREE.LineBasicMaterial({ color: SNAP_COLOR, depthTest: false, transparent: true, opacity: 0.9 })
   );
   ghost.renderOrder = 999;
   ghost.frustumCulled = false;
@@ -281,8 +333,9 @@ const ghostCorners = GHOST_CORNER_SIGNS.map(() => new THREE.Vector3());
  * Рисуется по цели, а не по сглаженному положению, поэтому идёт впереди объекта
  * и читается как «вот сюда встанет».
  */
-function updateGhost(sceneEl, point, normal, halfWidth, halfHeight) {
+function updateGhost(sceneEl, point, normal, halfWidth, halfHeight, color) {
   const g = ensureGhost(sceneEl);
+  g.material.color.setHex(color);
   const positions = g.geometry.attributes.position.array;
 
   for (let c = 0; c < 4; c++) {
@@ -341,8 +394,12 @@ export function placementSnapSystem(world, userinput, physicsSystem, sceneEl, dt
   if (!snapPlacementEnabled()) {
     snapQuery(world).forEach(eid => stopPlacing(world, eid));
     hideGhost();
+    freePlacementMode = false;
     return;
   }
+
+  // Вешаем слушатель только админу и только когда фича включена.
+  ensureKeyListener();
 
   snapEnterQuery(world).forEach(eid => {
     makeKinematic(world, physicsSystem, eid);
@@ -378,7 +435,7 @@ export function placementSnapSystem(world, userinput, physicsSystem, sceneEl, dt
     if (!pose) continue;
 
     const releasing = !isStillPlacing(world, eid, state);
-    const bypass = !!userinput.get(BYPASS_KEY);
+    const freeMode = isFreePlacementMode();
 
     obj.updateMatrices();
     obj.matrixWorld.decompose(currentPosition, currentQuaternion, currentScale);
@@ -392,7 +449,7 @@ export function placementSnapSystem(world, userinput, physicsSystem, sceneEl, dt
     raycaster.near = 0.01;
     raycaster.far = MAX_RAY_DISTANCE;
     intersections.length = 0;
-    if (envRoot && !bypass) raycaster.intersectObject(envRoot, true, intersections);
+    if (envRoot && !freeMode) raycaster.intersectObject(envRoot, true, intersections);
     const hit = intersections[0];
 
     if (hit && hit.face) {
@@ -427,7 +484,8 @@ export function placementSnapSystem(world, userinput, physicsSystem, sceneEl, dt
           hit.point,
           surfaceNormal,
           Math.max((boundsSize.x * currentScale.x) / 2, MIN_HALF_EXTENT),
-          Math.max((boundsSize.y * currentScale.y) / 2, MIN_HALF_EXTENT)
+          Math.max((boundsSize.y * currentScale.y) / 2, MIN_HALF_EXTENT),
+          SNAP_COLOR
         );
         drewGhost = true;
       }
@@ -447,6 +505,26 @@ export function placementSnapSystem(world, userinput, physicsSystem, sceneEl, dt
       towardsViewer.y = 0;
       if (towardsViewer.lengthSq() < 1e-6) towardsViewer.set(0, 0, 1);
       orientationFromNormal(towardsViewer.normalize(), UP, targetQuaternion);
+
+      // Янтарный контур вокруг самого объекта — признак свободного режима.
+      // Поверхности тут ни при чём, поэтому рисуем по габаритам в плоскости,
+      // обращённой к игроку.
+      if (!drewGhost && !releasing) {
+        ghostCenter
+          .copy(targetPosition)
+          .addScaledVector(xAxis, boundsCenter.x * currentScale.x)
+          .addScaledVector(yAxis, boundsCenter.y * currentScale.y)
+          .addScaledVector(zAxis, boundsCenter.z * currentScale.z);
+        updateGhost(
+          sceneEl,
+          ghostCenter,
+          zAxis,
+          Math.max((boundsSize.x * currentScale.x) / 2, MIN_HALF_EXTENT),
+          Math.max((boundsSize.y * currentScale.y) / 2, MIN_HALF_EXTENT),
+          FREE_COLOR
+        );
+        drewGhost = true;
+      }
     }
 
     // Сглаживаем только в процессе переноса. На первом кадре ставим сразу, иначе
