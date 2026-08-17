@@ -25,6 +25,29 @@
   }
 }
 
+// 3D lays the same strip across the top, where the middle of the screen is the
+// view itself. The width is definite rather than shrink-to-fit because the tile
+// sizing measures this box; the reserve keeps it clear of the menu button in the
+// top-left corner and the Objects/People menu in the top-right.
+:local(.row):local(.row) {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max(200px, min(60%, calc(100% - 560px)));
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: center;
+  align-content: flex-start;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+
+  @media (min-width: theme.$breakpoint-lg) {
+    top: 24px;
+  }
+}
+
 :local(.expand-button) {
   pointer-events: auto;
   border: 1px solid theme.$button-border-color;

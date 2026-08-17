@@ -1,12 +1,13 @@
-// In 2D the webcam and screenshare quads standing around the room are just
-// clutter seen from above — the same streams are already in the tile panel — so
-// top-down hides them and restores them on the way out.
+// Webcams and screenshares are presented as DOM tiles in both the 2D and the 3D
+// view, so the quads carrying the same streams around the room are redundant
+// clutter and stay hidden. VR is the exception — there is no DOM overlay in a
+// headset — so the camera system restores them while in VR.
 //
-// Both calls are idempotent and are made every frame from the camera system
-// (hide while 2D is on, restore while it is not) rather than only on the way in
-// and out. Edge-triggered was not enough: the mode can be left without going
-// through exitTopDown, and a quad left hidden stays hidden for the whole
-// session, which reads as a screenshare that is invisible in 3D.
+// Both calls are idempotent and are made every frame rather than on transitions.
+// Edge-triggered was not enough: quads spawn at any moment, the media loader
+// rewrites `visible` while one is loading, and a quad left hidden by a missed
+// transition stays hidden for the whole session — which reads as a screenshare
+// that is invisible to everyone.
 //
 // Avatar-face cameras are untouched by design: those are a texture swap on the
 // avatar mesh (video-texture-target), not a spawned entity, so they never show

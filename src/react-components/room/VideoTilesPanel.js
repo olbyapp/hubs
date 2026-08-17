@@ -17,10 +17,10 @@ const ROSTER_POLL_MS = 500;
 // and the column simply ran off the bottom of the screen.
 const TILE_ASPECT = 16 / 9;
 const TILE_GAP = 8;
-const COLUMN_TILE_MAX_WIDTH = 160;
-// Below this a tile is too small to recognise anyone in, so a long column wraps
-// into a second one instead of shrinking further.
-const COLUMN_TILE_MIN_WIDTH = 88;
+const STRIP_TILE_MAX_WIDTH = 160;
+// Below this a tile is too small to recognise anyone in, so a long strip wraps
+// into a second line instead of shrinking further.
+const STRIP_TILE_MIN_WIDTH = 88;
 
 // Inline rather than imported: the icon set has no expand/collapse glyph.
 const ExpandIcon = () => (
@@ -127,10 +127,19 @@ VideoTile.propTypes = {
 // them included. Clamped: never bigger than in the original design, and never so
 // small that the column turns into a strip of thumbnails.
 function columnTileWidth(count, height, buttonHeight) {
-  if (!count || !height) return COLUMN_TILE_MAX_WIDTH;
+  if (!count || !height) return STRIP_TILE_MAX_WIDTH;
   const buttonSpace = buttonHeight ? buttonHeight + TILE_GAP : 0;
   const perTile = (height - buttonSpace - TILE_GAP * (count - 1)) / count;
-  return Math.max(COLUMN_TILE_MIN_WIDTH, Math.min(COLUMN_TILE_MAX_WIDTH, Math.floor(perTile * TILE_ASPECT)));
+  return Math.max(STRIP_TILE_MIN_WIDTH, Math.min(STRIP_TILE_MAX_WIDTH, Math.floor(perTile * TILE_ASPECT)));
+}
+
+// Same idea lying down: the 3D view puts the strip across the top, so the tiles
+// share the width and the button sits beside them rather than above.
+function rowTileWidth(count, width, buttonWidth) {
+  if (!count || !width) return STRIP_TILE_MAX_WIDTH;
+  const buttonSpace = buttonWidth ? buttonWidth + TILE_GAP : 0;
+  const perTile = (width - buttonSpace - TILE_GAP * (count - 1)) / count;
+  return Math.max(STRIP_TILE_MIN_WIDTH, Math.min(STRIP_TILE_MAX_WIDTH, Math.floor(perTile)));
 }
 
 // Biggest tile that fits `count` of them into the box at 16:9, trying every row
@@ -148,26 +157,25 @@ function galleryTileWidth(count, width, height) {
   return Math.floor(best);
 }
 
-// Zoom-style video surface for the top-down view: everyone within earshot who
-// is sharing a camera or screen, as a column on the left, with one tile at a
-// time promoted to the centre or the whole set expanded into a grid.
+// Zoom-style video surface, and the only place webcams and screenshares are
+// shown in either view: everyone within earshot who is sharing, as a strip of
+// tiles, with one tile at a time promoted to the centre or the whole set
+// expanded into a gallery. The strip runs down the left in 2D, where the middle
+// of the screen is the map, and across the top in 3D, where the middle is what
+// you are looking at.
 export function VideoTilesPanel({ scene, presences, sessionId }) {
-  const active = useTopDownActive(scene);
+  const topDown = useTopDownActive(scene);
   const [tiles, setTiles] = useState([]);
   const [spotlightKey, setSpotlightKey] = useState(null);
   const [showGrid, setShowGrid] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
-  const [columnNode, setColumnNode] = useState(null);
+  const [stripNode, setStripNode] = useState(null);
   const [buttonNode, setButtonNode] = useState(null);
   const [gridNode, setGridNode] = useState(null);
 
   // Who is nearby and who is producing both change without an event we can
   // subscribe to (avatars move every frame), so the roster is polled.
   useEffect(() => {
-    if (!active) {
-      setTiles([]);
-      return;
-    }
     const update = () => {
       const next = collectVideoTiles(presences, sessionId);
       setTiles(prev => (sameTiles(prev, next) ? prev : next));
@@ -175,7 +183,7 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
     update();
     const interval = setInterval(update, ROSTER_POLL_MS);
     return () => clearInterval(interval);
-  }, [active, presences, sessionId]);
+  }, [presences, sessionId]);
 
   const spotlight = useMemo(() => tiles.find(tile => tile.key === spotlightKey) || null, [tiles, spotlightKey]);
   const listed = useMemo(
@@ -183,13 +191,17 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
     [tiles, spotlight]
   );
 
-  const columnSize = useElementSize(columnNode);
+  const stripSize = useElementSize(stripNode);
   const buttonSize = useElementSize(buttonNode);
   const gridSize = useElementSize(gridNode);
 
-  const columnTileStyle = useMemo(
-    () => ({ width: columnTileWidth(listed.length, columnSize.height, buttonSize.height) }),
-    [listed.length, columnSize.height, buttonSize.height]
+  const stripTileStyle = useMemo(
+    () => ({
+      width: topDown
+        ? columnTileWidth(listed.length, stripSize.height, buttonSize.height)
+        : rowTileWidth(listed.length, stripSize.width, buttonSize.width)
+    }),
+    [topDown, listed.length, stripSize.height, stripSize.width, buttonSize.height, buttonSize.width]
   );
 
   const gridTileStyle = useMemo(() => {
@@ -213,7 +225,7 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
     setFullscreen(false);
   }, []);
 
-  if (!active || !tiles.length) return null;
+  if (!tiles.length) return null;
 
   // Each block is placed straight into the room viewport rather than wrapped in
   // a full-bleed container, which would sit over the canvas and eat scene clicks.
@@ -246,7 +258,10 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
           </div>
         )
       )}
-      <div className={classNames(styles.column, { [styles.hidden]: fullscreen })} ref={setColumnNode}>
+      <div
+        className={classNames(topDown ? styles.column : styles.row, { [styles.hidden]: fullscreen })}
+        ref={setStripNode}
+      >
         {tiles.length > 1 && (
           <button className={styles.expandButton} onClick={toggleGrid} type="button" ref={setButtonNode}>
             {showGrid ? (
@@ -262,7 +277,7 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
               key={tile.key}
               tile={tile}
               size="fixed"
-              style={columnTileStyle}
+              style={stripTileStyle}
               onClick={() => openInCentre(tile.key)}
             />
           ))}

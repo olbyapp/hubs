@@ -19,7 +19,7 @@ import { addComponent, defineQuery, removeComponent } from "bitecs";
 import { INSPECTABLE_FLAGS } from "../bit-systems/inspect-system";
 import { isTopDownRequestedOnEntry } from "../utils/top-down-mode";
 import { applyCeilingCut, findCeilingCutY, removeCeilingCut } from "../utils/top-down-ceiling";
-import { hideClientVideoObjects, restoreClientVideoObjects } from "../utils/top-down-media";
+import { hideClientVideoObjects, restoreClientVideoObjects } from "../utils/client-video-objects";
 
 function getInspectableInHierarchy(eid) {
   let inspectable = findAncestorWithComponent(APP.world, Inspectable, eid);
@@ -347,7 +347,6 @@ export class CameraSystem {
     this.viewingCamera.layers.disable(Layers.CAMERA_LAYER_FIRST_PERSON_ONLY);
 
     this.hideCeilingForTopDown();
-    hideClientVideoObjects();
 
     AFRAME.scenes[0].emit("top_down_mode_changed", { active: true });
   }
@@ -365,7 +364,6 @@ export class CameraSystem {
     this.viewingCamera.layers.disable(Layers.CAMERA_LAYER_THIRD_PERSON_ONLY);
     this.viewingCamera.layers.enable(Layers.CAMERA_LAYER_FIRST_PERSON_ONLY);
     removeCeilingCut();
-    restoreClientVideoObjects();
 
     AFRAME.scenes[0].emit("top_down_mode_changed", { active: false });
   }
@@ -607,13 +605,15 @@ export class CameraSystem {
 
       this.ensureListenerIsParentedCorrectly(scene);
 
-      if (this.mode !== CAMERA_MODE_TOP_DOWN) {
-        // Reconciled here rather than only in exitTopDown: the mode can be left
-        // without going through it (the lobby ghost view forces first person,
-        // inspect swaps the mode out from under us), and the quads would then
-        // stay hidden for the rest of the session — invisible screenshares in
-        // 3D. No-op once nothing is hidden.
+      // Both views show webcams and screenshares as DOM tiles, so the in-world
+      // quads are hidden in both. A headset has no DOM overlay, so VR keeps
+      // them. Reconciled every frame rather than on transitions: quads spawn at
+      // any moment, and a state left over from a missed transition would stick
+      // for the rest of the session.
+      if (scene.is("vr-mode")) {
         restoreClientVideoObjects();
+      } else {
+        hideClientVideoObjects();
       }
 
       if (this.mode === CAMERA_MODE_FIRST_PERSON) {
@@ -661,10 +661,6 @@ export class CameraSystem {
         position.setFromMatrixPosition(this.avatarPOV.object3D.matrixWorld);
         tmpMat.compose(position, IDENTITY_QUAT, V_ONE);
         setMatrixWorld(this.topDownListenerAnchor, tmpMat);
-
-        // Reconcile rather than only re-assert: this also picks up quads spawned
-        // while 2D is on and re-hides after a restore triggered by inspect.
-        hideClientVideoObjects();
 
         this.avatarRig.object3D.updateMatrices();
         position.setFromMatrixPosition(this.avatarRig.object3D.matrixWorld);
