@@ -509,6 +509,14 @@ const preferenceLabels = defineMessages({
     id: "preferences-screen.preference.show-audio-debug-panel",
     defaultMessage: "Show Audio Debug Panel"
   },
+  showDayNightPanel: {
+    id: "preferences-screen.preference.show-day-night-panel",
+    defaultMessage: "Show Day/Night Panel"
+  },
+  showDayNightPanelTooltip: {
+    id: "preferences-screen.preference.show-day-night-panel.tooltip",
+    defaultMessage: "Time of day slider and sky tuning. Affects only your own view."
+  },
   audioPanningQuality: {
     id: "preferences-screen.preference.audio-panning-quality",
     defaultMessage: "Panning quality"
@@ -1302,6 +1310,11 @@ class PreferencesScreen extends Component {
           {
             key: "showRtcDebugPanel",
             prefType: PREFERENCE_LIST_ITEM_TYPE.CHECK_BOX
+          },
+          {
+            key: "showDayNightPanel",
+            prefType: PREFERENCE_LIST_ITEM_TYPE.CHECK_BOX,
+            tooltipKey: "showDayNightPanelTooltip"
           },
           {
             key: "cursorSize",

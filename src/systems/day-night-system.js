@@ -9,7 +9,7 @@ import {
   Vector3,
   WebGLCubeRenderTarget
 } from "three";
-import { openDayNightPanel } from "./day-night-panel";
+import { DAY_NIGHT_PANEL_ID, openDayNightPanel } from "./day-night-panel";
 
 /**
  * Смена дня и ночи по реальному положению солнца над офисом.
@@ -248,15 +248,29 @@ export class DayNightSystem {
   }
 
   updatePrefs() {
-    const enabled = !this.forcedOff && window.APP.store.state.preferences.enableDayNightCycle !== false;
-    if (enabled === this.enabled) return;
-    this.enabled = enabled;
-    if (enabled) {
-      this.lastUpdate = -Infinity;
-      this.lastEnvMapUpdate = -Infinity;
-    } else {
-      this.restore();
+    const preferences = window.APP.store.state.preferences;
+
+    const enabled = !this.forcedOff && preferences.enableDayNightCycle !== false;
+    if (enabled !== this.enabled) {
+      this.enabled = enabled;
+      if (enabled) {
+        this.lastUpdate = -Infinity;
+        this.lastEnvMapUpdate = -Infinity;
+      } else {
+        this.restore();
+      }
     }
+
+    this.setPanelVisible(preferences.showDayNightPanel === true);
+  }
+
+  /** Сверяем настройку с тем, что на экране: панель могли закрыть и её собственным крестиком. */
+  setPanelVisible(visible) {
+    const isOpen = !!document.getElementById(DAY_NIGHT_PANEL_ID);
+    if (visible === isOpen) return;
+    // До загрузки сцены открывать нечего — откроем из onSceneLoaded.
+    if (visible && !this.baseSky) return;
+    this.panel();
   }
 
   onSceneLoaded() {
@@ -267,7 +281,8 @@ export class DayNightSystem {
     this.baseFogColor = this.scene.fog ? this.scene.fog.color.clone() : null;
     this.lastUpdate = -Infinity;
     this.lastEnvMapUpdate = -Infinity;
-    if (this.wantPanel && !document.getElementById("day-night-panel")) this.panel();
+    const wantPanel = this.wantPanel || window.APP.store.state.preferences.showDayNightPanel === true;
+    if (wantPanel && !document.getElementById(DAY_NIGHT_PANEL_ID)) this.panel();
   }
 
   /** $DN.panel() — открыть отладочную панель, повторный вызов закрывает. */

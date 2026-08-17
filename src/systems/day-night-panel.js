@@ -9,7 +9,7 @@
  * заодно дают воспроизводимые значения вместо «примерно вот столько».
  */
 
-const PANEL_ID = "day-night-panel";
+export const DAY_NIGHT_PANEL_ID = "day-night-panel";
 
 const pad = n => String(n).padStart(2, "0");
 const hhmm = minutes => `${pad(Math.floor(minutes / 60))}:${pad(Math.round(minutes) % 60)}`;
@@ -18,7 +18,7 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const TIME_PRESETS = ["06:00", "09:00", "13:00", "17:00", "20:30", "23:00"];
 
 export function openDayNightPanel(system) {
-  const existing = document.getElementById(PANEL_ID);
+  const existing = document.getElementById(DAY_NIGHT_PANEL_ID);
   if (existing) {
     existing.__dispose();
     return null;
@@ -40,7 +40,7 @@ export function openDayNightPanel(system) {
   };
 
   const root = document.createElement("div");
-  root.id = PANEL_ID;
+  root.id = DAY_NIGHT_PANEL_ID;
   root.style.cssText = `position:fixed;top:12px;right:12px;z-index:99999;width:320px;box-sizing:border-box;
     background:rgba(18,20,26,.94);color:#e8eaf0;font:12px/1.45 system-ui,sans-serif;border-radius:10px;
     padding:12px 14px;box-shadow:0 8px 28px rgba(0,0,0,.5);user-select:none`;
@@ -350,6 +350,12 @@ export function openDayNightPanel(system) {
     clearInterval(tick);
     if (envTimer) clearTimeout(envTimer);
     root.remove();
+    // Снимаем галку в настройках, иначе она осталась бы включённой при закрытой панели,
+    // и повторное включение потребовало бы двух кликов. Панели к этому моменту уже нет,
+    // так что обработчик statechanged просто увидит совпадение и ничего не сделает.
+    if (window.APP?.store?.state.preferences.showDayNightPanel) {
+      window.APP.store.update({ preferences: { showDayNightPanel: false } });
+    }
   };
 
   return root;
