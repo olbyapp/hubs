@@ -9,6 +9,7 @@ import {
   Vector3,
   WebGLCubeRenderTarget
 } from "three";
+import { openDayNightPanel } from "./day-night-panel";
 
 /**
  * Смена дня и ночи по реальному положению солнца над офисом.
@@ -238,6 +239,7 @@ export class DayNightSystem {
     if (qs.has("daynightLon")) config.longitude = parseFloat(qs.get("daynightLon"));
     if (qs.has("daynightSpeed")) this.speed(parseFloat(qs.get("daynightSpeed")));
     if (qs.has("daynightTime")) this.setTime(qs.get("daynightTime"));
+    if (qs.has("daynightPanel")) this.wantPanel = qs.get("daynightPanel") !== "0";
   }
 
   updatePrefs() {
@@ -260,6 +262,12 @@ export class DayNightSystem {
     this.baseFogColor = this.scene.fog ? this.scene.fog.color.clone() : null;
     this.lastUpdate = -Infinity;
     this.lastEnvMapUpdate = -Infinity;
+    if (this.wantPanel && !document.getElementById("day-night-panel")) this.panel();
+  }
+
+  /** $DN.panel() — открыть отладочную панель, повторный вызов закрывает. */
+  panel() {
+    return openDayNightPanel(this);
   }
 
   scanScene() {
