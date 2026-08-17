@@ -28,13 +28,15 @@ export function openDayNightPanel(system) {
     return null;
   }
 
-  const uniforms = () => system.environmentSystem.skybox.sky.material.uniforms;
+  // Параметры неба живут в config как переопределения: null означает «взять из сцены».
+  // Панель всегда пишет именно туда, иначе система перезапишет правку на ближайшем тике.
+  const skyValue = (key, baseKey) => (system.config[key] === null ? system.baseSky[baseKey] : system.config[key]);
   const initial = {
     northOffset: system.config.northOffset,
-    luminance: uniforms().luminance.value,
-    rayleigh: system.baseSky.rayleigh,
-    turbidity: system.baseSky.turbidity,
-    sunMode: system.config.sunMode
+    sunMode: system.config.sunMode,
+    skyLuminance: system.config.skyLuminance,
+    skyRayleigh: system.config.skyRayleigh,
+    skyTurbidity: system.config.skyTurbidity
   };
 
   const root = document.createElement("div");
@@ -244,22 +246,24 @@ export function openDayNightPanel(system) {
   numberRow({
     label: "Яркость неба (меньше = ярче)",
     min: 0.6,
-    max: 1.15,
+    // Выше 2^(1/4) ≈ 1.189 множитель log2(2/luminance⁴) уходит в ноль и небо становится
+    // чёрным намертво, поэтому шкала обрывается чуть раньше обрыва.
+    max: 1.18,
     step: 0.005,
     steps: [-0.05, -0.01, 0.01, 0.05],
-    get: () => uniforms().luminance.value,
-    set: value => (uniforms().luminance.value = value),
+    get: () => skyValue("skyLuminance", "luminance"),
+    set: value => (system.config.skyLuminance = value),
     format: value => value.toFixed(3)
   });
 
   numberRow({
     label: "Рассеяние / синева (rayleigh)",
-    min: 0.1,
+    min: 0,
     max: 4,
     step: 0.02,
     steps: [-0.4, -0.1, 0.1, 0.4],
-    get: () => system.baseSky.rayleigh,
-    set: value => (system.baseSky.rayleigh = value)
+    get: () => skyValue("skyRayleigh", "rayleigh"),
+    set: value => (system.config.skyRayleigh = value)
   });
 
   numberRow({
@@ -268,8 +272,8 @@ export function openDayNightPanel(system) {
     max: 20,
     step: 0.1,
     steps: [-2, -0.5, 0.5, 2],
-    get: () => system.baseSky.turbidity,
-    set: value => (system.baseSky.turbidity = value)
+    get: () => skyValue("skyTurbidity", "turbidity"),
+    set: value => (system.config.skyTurbidity = value)
   });
 
   // --- режим солнца и действия ---------------------------------------------
@@ -307,9 +311,9 @@ export function openDayNightPanel(system) {
       const settings = {
         northOffset: system.config.northOffset,
         sunMode: system.config.sunMode,
-        luminance: +uniforms().luminance.value.toFixed(3),
-        rayleigh: +system.baseSky.rayleigh.toFixed(3),
-        turbidity: +system.baseSky.turbidity.toFixed(2)
+        luminance: +skyValue("skyLuminance", "luminance").toFixed(3),
+        rayleigh: +skyValue("skyRayleigh", "rayleigh").toFixed(3),
+        turbidity: +skyValue("skyTurbidity", "turbidity").toFixed(2)
       };
       const text = JSON.stringify(settings);
       if (navigator.clipboard) navigator.clipboard.writeText(text);
@@ -323,9 +327,9 @@ export function openDayNightPanel(system) {
     () => {
       system.config.northOffset = initial.northOffset;
       system.config.sunMode = initial.sunMode;
-      uniforms().luminance.value = initial.luminance;
-      system.baseSky.rayleigh = initial.rayleigh;
-      system.baseSky.turbidity = initial.turbidity;
+      system.config.skyLuminance = initial.skyLuminance;
+      system.config.skyRayleigh = initial.skyRayleigh;
+      system.config.skyTurbidity = initial.skyTurbidity;
       rows.forEach(render => render());
       apply();
     },

@@ -45,7 +45,7 @@ const config = {
   // Куда в сцене смотрит север, в градусах. У сцены нет сторон света — автор строил
   // здание как удобно, — поэтому связь «мировая −Z = север» задаётся вручную. Крутить,
   // пока восход не встанет со стороны окон.
-  northOffset: 0,
+  northOffset: 30,
 
   // Что делать с направленным светом сцены. Роль у него бывает разная, и угадать её
   // из GLB нельзя, поэтому выбираем руками:
@@ -56,7 +56,7 @@ const config = {
   //                движущиеся тени, а авторская заливка остаётся на месте.
   //   "takeover" — свет сцены и есть солнце, разворачиваем его самого. Годится, только
   //                если автор ставил его именно как солнце.
-  sunMode: "fill",
+  sunMode: "add",
   // Пиковая интенсивность своего солнца в режиме "add". null — взять интенсивность
   // самого яркого направленного света сцены и умножить на ownSunIntensityFactor.
   ownSunIntensity: null,
@@ -96,9 +96,14 @@ const config = {
   // Множитель экспозиции в глухую ночь.
   exposureNightFactor: 0.55,
 
-  // Небо автор уже настроил в Spoke, поэтому у горизонта не подставляем свои абсолютные
-  // значения, а множим авторские: в полдень картинка ровно та, что он собрал, а к закату
-  // добавляются дымка и краснота в его же пропорциях.
+  // Небо автор настраивал в Spoke под солнце, которого не бывает (диск стоял на 70° и на
+  // севере), поэтому на реальных высотах те значения читались как вечные сумерки. Числа
+  // ниже подобраны живьём под настоящее солнце и заменяют авторские. null в любом из трёх
+  // означает «взять из сцены» — так система останется пригодной для других сцен.
+  skyLuminance: 1.15,
+  skyRayleigh: 0.1,
+  skyTurbidity: 10.3,
+  // К закату дымка и краснота растут в тех же пропорциях от значений выше.
   skyTurbidityHorizonFactor: 1.8,
   skyRayleighHorizonFactor: 1.6,
 
@@ -311,7 +316,8 @@ export class DayNightSystem {
     this.baseSky = {
       sunPosition: uniforms.sunPosition.value.clone(),
       turbidity: uniforms.turbidity.value,
-      rayleigh: uniforms.rayleigh.value
+      rayleigh: uniforms.rayleigh.value,
+      luminance: uniforms.luminance.value
     };
   }
 
@@ -375,8 +381,11 @@ export class DayNightSystem {
     // что делает штатный updateSunPosition, только направление берём из эфемерид.
     uniforms.sunPosition.value.copy(sunDirection);
     if (this.baseSky) {
-      uniforms.turbidity.value = this.baseSky.turbidity * (1 + (config.skyTurbidityHorizonFactor - 1) * warmth);
-      uniforms.rayleigh.value = this.baseSky.rayleigh * (1 + (config.skyRayleighHorizonFactor - 1) * warmth);
+      const turbidity = config.skyTurbidity === null ? this.baseSky.turbidity : config.skyTurbidity;
+      const rayleigh = config.skyRayleigh === null ? this.baseSky.rayleigh : config.skyRayleigh;
+      uniforms.turbidity.value = turbidity * (1 + (config.skyTurbidityHorizonFactor - 1) * warmth);
+      uniforms.rayleigh.value = rayleigh * (1 + (config.skyRayleighHorizonFactor - 1) * warmth);
+      if (config.skyLuminance !== null) uniforms.luminance.value = config.skyLuminance;
     }
     // Гасить небо вручную не нужно: ниже горизонта модель Пришема темнеет сама.
   }
@@ -574,6 +583,7 @@ export class DayNightSystem {
       uniforms.sunPosition.value.copy(this.baseSky.sunPosition);
       uniforms.turbidity.value = this.baseSky.turbidity;
       uniforms.rayleigh.value = this.baseSky.rayleigh;
+      uniforms.luminance.value = this.baseSky.luminance;
       if (envSystem.envMapFromSkybox) {
         this.lastEnvMapSun.set(0, 0, 0);
         this.regenerateEnvMap(sky, envSystem);
