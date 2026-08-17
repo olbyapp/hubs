@@ -373,6 +373,17 @@ export class DayNightSystem {
 
   applySun(day, sunUp, warmth) {
     const mode = this.effectiveSunMode();
+    if (mode !== this.lastSunMode) {
+      // Уходя из takeover, возвращаем свету авторскую ориентацию: дальше мы его
+      // разворачивать не будем, а он так и остался бы смотреть куда-то в закат.
+      if (this.lastSunMode === "takeover" && this.sun) {
+        this.sun.light.quaternion.copy(this.sun.quaternion);
+        this.sun.light.position.copy(this.sun.position);
+        this.sun.light.matrixNeedsUpdate = true;
+      }
+      this.lastSunMode = mode;
+    }
+
     tmpColorA.set(config.sunZenithColor);
     tmpColorB.set(config.sunHorizonColor);
     sunColor.lerpColors(tmpColorA, tmpColorB, warmth);
