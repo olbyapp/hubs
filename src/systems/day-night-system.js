@@ -575,6 +575,23 @@ export class DayNightSystem {
 
   // --- отладка из консоли -------------------------------------------------
 
+  /**
+   * $DN.refreshEnv() — пересобрать карту окружения немедленно.
+   *
+   * Нужно при подборе параметров неба: потолок и прочие грани, отвёрнутые от источников,
+   * освещаются только через env-map, а она снимок и обновляется раз в несколько минут.
+   * Без этого правка униформ неба выглядит как «ничего не произошло».
+   */
+  refreshEnv() {
+    const envSystem = this.environmentSystem;
+    const sky = envSystem?.skybox;
+    if (!sky || !envSystem.envMapFromSkybox) return "карта окружения строится не из неба — пересобирать нечего";
+    this.lastEnvMapUpdate = Date.now();
+    this.lastEnvMapSun.copy(sunDirection);
+    this.regenerateEnvMap(sky, envSystem);
+    return "пересобрано";
+  }
+
   /** $DN.setTime("21:30") — застыть на этом местном времени; $DN.setTime(null) — вернуть реальное. */
   setTime(value) {
     if (!value) {
