@@ -91,7 +91,6 @@ const localBounds = new THREE.Box3();
 const boundsCenter = new THREE.Vector3();
 const boundsSize = new THREE.Vector3();
 const nodeBounds = new THREE.Box3();
-const ancestorChain = [];
 const rootInverse = new THREE.Matrix4();
 const toRootSpace = new THREE.Matrix4();
 const currentPosition = new THREE.Vector3();
@@ -191,8 +190,15 @@ export function shouldSnapPlace(world, eid) {
  * Проверка на сам переносимый объект идёт первой, иначе он поймал бы сам себя.
  */
 function isAcceptableSurface(world, hitObject, heldObj, envRoot) {
+  // Сперва отдельным проходом убеждаемся, что это не часть переносимого объекта.
+  // Одним проходом нельзя: медиа бывает вложенным, и MediaLoader может оказаться
+  // на промежуточном узле ВНУТРИ переносимого. Тогда правило «это медиа —
+  // принимаем» сработало бы раньше, чем обход дошёл бы до корня, и объект начал
+  // бы липнуть сам к себе.
   for (let node = hitObject; node; node = node.parent) {
     if (node === heldObj) return false;
+  }
+  for (let node = hitObject; node; node = node.parent) {
     if (envRoot && node === envRoot) return true;
     if (node.eid && hasComponent(world, MediaLoader, node.eid)) return true;
     if (node.el?.components?.["media-loader"]) return true;
@@ -268,17 +274,20 @@ function findContentRoot(world, eid, obj) {
  */
 function computeContentBounds(root, contentRoot, target) {
   target.makeEmpty();
-  root.updateMatrices();
-  // traverse() обновляет матрицы сверху вниз сам, но начинаем мы не с корня, а с
-  // поддерева контента — промежуточные узлы (у нового загрузчика это offset-объект,
-  // который ещё и анимирует масштаб при догрузке) надо освежить отдельно.
-  ancestorChain.length = 0;
-  for (let node = contentRoot; node && node !== root; node = node.parent) {
-    ancestorChain.push(node);
-  }
-  for (let i = ancestorChain.length - 1; i >= 0; i--) {
-    ancestorChain[i].updateMatrices();
-  }
+  // Принудительно освежаем мировые матрицы всего поддерева — та же идиома, что в
+  // getBox (utils/auto-box-collider).
+  //
+  // Без этого бокс уезжает: на прошлом кадре setMatrixWorld переписал matrixWorld
+  // корня и лишь пометил детей как требующих обновления. Мировые матрицы корня и
+  // меша расходятся на смещение за кадр, и разница попадает в локальный бокс как
+  // лишняя глубина. По ней объект отодвигается от поверхности — к игроку, — на
+  // следующем кадре расхождение больше, и так вразнос.
+  //
+  // У модели собственная толщина много больше ошибки и всё выглядит стабильно.
+  // У плоской картинки min.z ровно ноль, поэтому ошибка — это вся глубина бокса,
+  // и картинка улетала в игрока.
+  root.updateMatrices(true, true);
+  root.updateMatrixWorld(true);
 
   rootInverse.copy(root.matrixWorld).invert();
   contentRoot.traverse(node => {
