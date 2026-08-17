@@ -41,6 +41,10 @@ const config = {
   // время рассвета и заката — коллега из другого пояса видит московское небо.
   latitude: 55.7558,
   longitude: 37.6173,
+  // Куда в сцене смотрит север, в градусах. У сцены нет сторон света — автор строил
+  // здание как удобно, — поэтому связь «мировая −Z = север» задаётся вручную. Крутить,
+  // пока восход не встанет со стороны окон.
+  northOffset: 0,
 
   // Что делать с направленным светом сцены. Роль у него бывает разная, и угадать её
   // из GLB нельзя, поэтому выбираем руками:
@@ -328,8 +332,9 @@ export class DayNightSystem {
     const { altitude, azimuth } = solarPosition(date, config.latitude, config.longitude);
 
     // Мировые оси Hubs: +X — восток, -Z — север, +Y — вверх. Азимут из solarPosition
-    // отсчитан от юга к западу, поэтому доворачиваем на 180° до компасного.
-    const compass = azimuth + Math.PI;
+    // отсчитан от юга к западу, поэтому доворачиваем на 180° до компасного, а сверху
+    // добавляем ориентацию здания.
+    const compass = azimuth + Math.PI + config.northOffset * DEG;
     const cosAltitude = Math.cos(altitude);
     sunDirection.set(Math.sin(compass) * cosAltitude, Math.sin(altitude), -Math.cos(compass) * cosAltitude);
 
@@ -498,7 +503,11 @@ export class DayNightSystem {
     const envSystem = this.environmentSystem;
     const sky = envSystem?.skybox;
     if (!sky || !envSystem.envMapFromSkybox) return;
-    if (now - this.lastEnvMapUpdate < ENVMAP_INTERVAL_MS) return;
+    // В реальном времени раз в 3 минуты незаметно, но при ускорении между пересборками
+    // накапливались часы — и рассеянный свет прыгал ступенькой. Делим интервал на
+    // ускорение, снизу ограничив, чтобы не жечь PMREM каждый кадр.
+    const interval = Math.max(2000, ENVMAP_INTERVAL_MS / Math.max(1, config.timeScale));
+    if (now - this.lastEnvMapUpdate < interval) return;
     if (this.lastEnvMapUpdate !== -Infinity && this.lastEnvMapSun.dot(sunDirection) > ENVMAP_MIN_SUN_DELTA) return;
 
     this.lastEnvMapUpdate = now;
@@ -588,6 +597,7 @@ export class DayNightSystem {
     this.speedAnchorReal = Date.now();
     config.timeScale = multiplier;
     this.lastUpdate = -Infinity;
+    this.lastEnvMapUpdate = -Infinity;
     return this.status();
   }
 
