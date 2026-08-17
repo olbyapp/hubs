@@ -83,7 +83,7 @@ import { ReactionPopoverContainer } from "./room/ReactionPopoverContainer";
 import { StatusPopoverContainer } from "./room/StatusPopoverContainer";
 import { TopDownToggleButton } from "./room/TopDownToggleButton";
 import { VideoTilesPanel } from "./room/VideoTilesPanel";
-import { canUseTopDown, requestTopDownOnEntry } from "../utils/top-down-mode";
+import { requestTopDownOnEntry } from "../utils/top-down-mode";
 import { SafariMicModal } from "./room/SafariMicModal";
 import { RoomSignInModalContainer } from "./auth/RoomSignInModalContainer";
 import { SignInStep } from "./auth/SignInModal";
@@ -867,9 +867,7 @@ class UIRoot extends Component {
           roomName={this.props.hub.name}
           showJoinRoom={!this.state.waitingOnAudio && !this.props.entryDisallowed}
           onJoinRoom={this.onJoinRoomClicked}
-          showJoinRoom2D={
-            !this.state.waitingOnAudio && !this.props.entryDisallowed && !isLockedDownDemo && canUseTopDown()
-          }
+          showJoinRoom2D={!this.state.waitingOnAudio && !this.props.entryDisallowed && !isLockedDownDemo}
           onJoinRoom2D={() => {
             requestTopDownOnEntry();
             this.onJoinRoomClicked();
@@ -1423,7 +1421,7 @@ class UIRoot extends Component {
                 viewport={
                   <>
                     {!this.state.dialog && renderEntryFlow ? entryDialog : undefined}
-                    {entered && canUseTopDown() && (
+                    {entered && (
                       <VideoTilesPanel
                         scene={this.props.scene}
                         presences={this.props.presences}
@@ -1667,7 +1665,7 @@ class UIRoot extends Component {
                           />
                         )}
                         <StatusPopoverContainer />
-                        {canUseTopDown() && <TopDownToggleButton scene={this.props.scene} />}
+                        <TopDownToggleButton scene={this.props.scene} />
                       </>
                     )}
                     {!isLockedDownDemo && (

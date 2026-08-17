@@ -6,7 +6,7 @@ import { FormattedMessage } from "react-intl";
 import { useTopDownActive } from "./useTopDownActive";
 
 // Toolbar toggle between the first-person view and the Gather-style top-down
-// ("2D") view. Only mounted for admins / ?2d — see canUseTopDown().
+// ("2D") view.
 export function TopDownToggleButton({ scene }) {
   const active = useTopDownActive(scene);
 
