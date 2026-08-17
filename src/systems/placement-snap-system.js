@@ -37,7 +37,7 @@ import { paths } from "./userinput/paths";
 // объект висит на дистанции вдоль луча, лицом к игроку, глубина колесом. Режим
 // виден по цвету — янтарный курсор и янтарный контур вместо синего.
 //
-// Фича видна только администратору инстанса, см. utils/experimental-features.
+// Работает у всех. Аварийный выход — ?snap=0, см. utils/experimental-features.
 
 const UP = new THREE.Vector3(0, 1, 0);
 const IDENTITY = new THREE.Matrix4();
@@ -113,7 +113,8 @@ let ghost = null;
 // undefined — и прилипание возвращалось прямо под зажатым Alt.
 //
 // Поэтому слушаем клавишу сами: состояние живёт здесь и от чистки ввода не
-// зависит, а preventDefault не даёт браузеру забрать фокус в меню.
+// зависит, а preventDefault не даёт браузеру забрать фокус в меню. Побочный
+// эффект: во вкладке с комнатой Alt больше не открывает меню браузера.
 let freePlacementMode = false;
 let keyListenerAttached = false;
 
@@ -389,8 +390,6 @@ function stopPlacing(world, eid) {
 }
 
 export function placementSnapSystem(world, userinput, physicsSystem, sceneEl, dt) {
-  // Права приезжают асинхронно и могут смениться посреди сессии, поэтому гейт
-  // проверяем каждый кадр, а не один раз при инициализации.
   if (!snapPlacementEnabled()) {
     snapQuery(world).forEach(eid => stopPlacing(world, eid));
     hideGhost();
@@ -398,7 +397,6 @@ export function placementSnapSystem(world, userinput, physicsSystem, sceneEl, dt
     return;
   }
 
-  // Вешаем слушатель только админу и только когда фича включена.
   ensureKeyListener();
 
   snapEnterQuery(world).forEach(eid => {
