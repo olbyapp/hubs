@@ -91,10 +91,11 @@ const config = {
   // Множитель экспозиции в глухую ночь.
   exposureNightFactor: 0.55,
 
-  skyTurbidityDay: 4,
-  skyTurbidityHorizon: 10,
-  skyRayleighDay: 2,
-  skyRayleighHorizon: 3,
+  // Небо автор уже настроил в Spoke, поэтому у горизонта не подставляем свои абсолютные
+  // значения, а множим авторские: в полдень картинка ровно та, что он собрал, а к закату
+  // добавляются дымка и краснота в его же пропорциях.
+  skyTurbidityHorizonFactor: 1.8,
+  skyRayleighHorizonFactor: 1.6,
 
   fogNightColor: "#0b1020",
 
@@ -360,8 +361,10 @@ export class DayNightSystem {
     // Шейдер сам нормализует sunPosition, поэтому пишем единичный вектор — ровно то же,
     // что делает штатный updateSunPosition, только направление берём из эфемерид.
     uniforms.sunPosition.value.copy(sunDirection);
-    uniforms.turbidity.value = config.skyTurbidityDay + (config.skyTurbidityHorizon - config.skyTurbidityDay) * warmth;
-    uniforms.rayleigh.value = config.skyRayleighDay + (config.skyRayleighHorizon - config.skyRayleighDay) * warmth;
+    if (this.baseSky) {
+      uniforms.turbidity.value = this.baseSky.turbidity * (1 + (config.skyTurbidityHorizonFactor - 1) * warmth);
+      uniforms.rayleigh.value = this.baseSky.rayleigh * (1 + (config.skyRayleighHorizonFactor - 1) * warmth);
+    }
     // Гасить небо вручную не нужно: ниже горизонта модель Пришема темнеет сама.
   }
 
