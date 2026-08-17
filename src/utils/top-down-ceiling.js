@@ -17,37 +17,22 @@ import { forEachMaterial } from "./material-utils";
 const clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
 const clipPlanes = [clipPlane];
 
-// The cut used to sit a fixed 3m above the avatar's feet. Since the plane keeps
-// what is BELOW it, that quietly did nothing in a room whose ceiling is lower
-// than 3m: the ceiling stayed and 2D looked straight at it. Every metre of the
-// threshold therefore has to be below the real ceiling — so look up from the
-// avatar and put the plane just under whatever is overhead.
+// Since the plane keeps what is BELOW it, the threshold has to sit under every
+// roof in the room. Two attempts to be clever about it failed in the same room,
+// and its measured geometry says why: the "ceiling" is not one slab but sections
+// at 3.08, 3.19 and 3.44. A fixed 3m above the avatar's feet left the low
+// sections in place from a raised floor, and hugging whatever a ray found
+// overhead landed at 3.39 — above the section at 3.19, which stayed in the way.
 //
-// The ray starts above head height, which ignores desks and shelves for free,
-// and searches far enough up to find the ceiling of a hall rather than settling
-// for a conservative slice. When it finds nothing (open sky, or a ceiling whose
-// faces point away from the room and so are invisible to a ray) the fallback has
-// to be low enough to clear any real ceiling — cutting a bit more wall than
-// necessary costs a top-down view nothing, leaving the ceiling on ruins it.
-const CUT_MIN_OFFSET = 2;
-const CUT_SEARCH_DISTANCE = 8;
-const CUT_CLEARANCE = 0.05;
-
-const UP = new THREE.Vector3(0, 1, 0);
-const ceilingRaycaster = new THREE.Raycaster();
-const rayOrigin = new THREE.Vector3();
+// So no search: the plane goes just above head height, the only reference that
+// does not depend on the room. Everything higher goes, hanging lamps and the tops
+// of walls included, which costs a map view nothing. Avatars, name tags and media
+// are never clipped (only environment materials are patched), so a tall avatar
+// keeps its head.
+const CUT_OFFSET = 2.1;
 
 export function findCeilingCutY(feetPosition) {
-  const environmentScene = document.querySelector("#environment-scene");
-  rayOrigin.set(feetPosition.x, feetPosition.y + CUT_MIN_OFFSET, feetPosition.z);
-  if (!environmentScene) return rayOrigin.y;
-
-  ceilingRaycaster.set(rayOrigin, UP);
-  ceilingRaycaster.far = CUT_SEARCH_DISTANCE;
-  const overhead = ceilingRaycaster.intersectObject(environmentScene.object3D, true)[0];
-  if (!overhead) return rayOrigin.y;
-
-  return Math.max(rayOrigin.y, rayOrigin.y + overhead.distance - CUT_CLEARANCE);
+  return feetPosition.y + CUT_OFFSET;
 }
 
 // material -> the clippingPlanes it had before we touched it.
