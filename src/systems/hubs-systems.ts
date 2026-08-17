@@ -44,6 +44,7 @@ import { removeObject3DSystem } from "./remove-object3D-system";
 import { networkedTransformSystem } from "./networked-transform";
 import { buttonSystems } from "./single-action-button-system";
 import { constraintsSystem } from "./bit-constraints-system";
+import { placementSnapSystem } from "./placement-snap-system";
 import { mediaFramesSystem } from "./bit-media-frames";
 import { videoSystem } from "../bit-systems/video-system";
 import { cameraToolSystem } from "../bit-systems/camera-tool";
@@ -219,6 +220,10 @@ export function mainTick(xrFrame: XRFrame, renderer: WebGLRenderer, scene: Scene
   hubsSystems.physicsSystem.tick(dt);
   constraintsSystem(world, hubsSystems.physicsSystem);
   floatyObjectSystem(world);
+  // После floatyObjectSystem: она переводит объект в dynamic только при появлении
+  // Constraint, а у snap-объектов констрейнта нет, так что они остаются kinematic
+  // и наши записи в трансформ доживают до конца кадра.
+  placementSnapSystem(world, aframeSystems.userinput, hubsSystems.physicsSystem, sceneEl, dt);
 
   hoverableVisualsSystem(world);
 

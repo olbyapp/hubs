@@ -88,6 +88,9 @@ export const ConstraintHandLeft = defineComponent();
 export const ConstraintRemoteRight = defineComponent();
 export const ConstraintRemoteLeft = defineComponent();
 export const OffersRemoteConstraint = defineComponent();
+// Держится не физическим констрейнтом, а placement-snap-system: объект остаётся
+// kinematic и его трансформ каждый кадр пишет система прилипания к поверхностям.
+export const SnapPlacing = defineComponent();
 export const HandCollisionTarget = defineComponent();
 export const OffersHandConstraint = defineComponent();
 export const TogglesHoveredActionSet = defineComponent();

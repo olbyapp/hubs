@@ -14,13 +14,15 @@ import {
   AEntity,
   Networked,
   MediaLoader,
-  Deletable
+  Deletable,
+  SnapPlacing
 } from "../bit-components";
 import { canMove } from "../utils/permissions-utils";
 import { canMove as canMoveEntity } from "../utils/bit-permissions-utils";
 import { isPinned } from "../bit-systems/networking";
 import { takeOwnership } from "../utils/take-ownership";
 import { findAncestorWithComponents } from "../utils/bit-utils";
+import { shouldSnapPlace } from "./placement-snap-system";
 
 const GRAB_REMOTE_RIGHT = paths.actions.cursor.right.grab;
 const DROP_REMOTE_RIGHT = paths.actions.cursor.right.drop;
@@ -75,7 +77,7 @@ export function isAEntityPinned(world, eid) {
 // Alternate solution: Simply recognize an entity as pinned if its any
 // ancestor is pinned (in hold-system) unless there is a case that
 // descendant entity under pinned entity wants to be grabbable.
-function grab(world, userinput, queryHovered, held, grabPath) {
+function grab(world, userinput, queryHovered, held, grabPath, isRemote) {
   const hovered = queryHovered(world)[0];
 
   // Special path for Dropped/Pasted Media with new loader enabled. Check the comment above.
@@ -94,6 +96,12 @@ function grab(world, userinput, queryHovered, held, grabPath) {
     }
     addComponent(world, held, target);
     addComponent(world, Held, target);
+    // Медиа, взятое курсором, ведёт не констрейнт, а placement-snap-system:
+    // объект остаётся kinematic и прижимается к поверхностям сцены. Руки в VR
+    // сюда не попадают — там прямое 6DOF-размещение и без того удобное.
+    if (isRemote && shouldSnapPlace(world, target)) {
+      addComponent(world, SnapPlacing, target);
+    }
   }
 }
 
@@ -127,10 +135,10 @@ const queryHeldHandLeft = defineQuery([Holdable, HeldHandLeft]);
 const queryHoveredHandLeft = defineQuery([Holdable, HoveredHandLeft]);
 
 export function holdSystem(world, userinput) {
-  grab(world, userinput, queryHoveredRemoteRight, HeldRemoteRight, GRAB_REMOTE_RIGHT);
-  grab(world, userinput, queryHoveredRemoteLeft, HeldRemoteLeft, GRAB_REMOTE_LEFT);
-  grab(world, userinput, queryHoveredHandRight, HeldHandRight, GRAB_HAND_RIGHT);
-  grab(world, userinput, queryHoveredHandLeft, HeldHandLeft, GRAB_HAND_LEFT);
+  grab(world, userinput, queryHoveredRemoteRight, HeldRemoteRight, GRAB_REMOTE_RIGHT, true);
+  grab(world, userinput, queryHoveredRemoteLeft, HeldRemoteLeft, GRAB_REMOTE_LEFT, true);
+  grab(world, userinput, queryHoveredHandRight, HeldHandRight, GRAB_HAND_RIGHT, false);
+  grab(world, userinput, queryHoveredHandLeft, HeldHandLeft, GRAB_HAND_LEFT, false);
 
   drop(world, userinput, queryHeldRemoteRight, HeldRemoteRight, DROP_REMOTE_RIGHT);
   drop(world, userinput, queryHeldRemoteLeft, HeldRemoteLeft, DROP_REMOTE_LEFT);

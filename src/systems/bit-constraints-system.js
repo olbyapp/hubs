@@ -2,7 +2,16 @@ import { anyEntityWith, findAncestorEntity } from "../utils/bit-utils";
 import { CONSTANTS } from "three-ammo";
 const { DISABLE_DEACTIVATION, ACTIVE_TAG } = CONSTANTS.ACTIVATION_STATE;
 
-import { addComponent, defineQuery, enterQuery, entityExists, removeComponent, exitQuery, hasComponent } from "bitecs";
+import {
+  addComponent,
+  defineQuery,
+  enterQuery,
+  entityExists,
+  removeComponent,
+  exitQuery,
+  hasComponent,
+  Not
+} from "bitecs";
 import {
   RemoteRight,
   RemoteLeft,
@@ -19,22 +28,27 @@ import {
   ConstraintHandLeft,
   ConstraintHandRight,
   ConstraintRemoteLeft,
-  ConstraintRemoteRight
+  ConstraintRemoteRight,
+  SnapPlacing
 } from "../bit-components";
 
-const queryRemoteRight = defineQuery([HeldRemoteRight, OffersRemoteConstraint]);
+// Not(SnapPlacing): объекты, которые ведёт placement-snap-system, держатся не
+// физикой, а прямой записью трансформа. Упругий констрейнт спорил бы с ней за
+// положение тела в том же кадре. Пометка ставится в hold-system до этой системы,
+// поэтому такие сущности в запросы ниже вообще не попадают.
+const queryRemoteRight = defineQuery([HeldRemoteRight, OffersRemoteConstraint, Not(SnapPlacing)]);
 const queryEnterRemoteRight = enterQuery(queryRemoteRight);
 const queryExitRemoteRight = exitQuery(queryRemoteRight);
 
-const queryRemoteLeft = defineQuery([HeldRemoteLeft, OffersRemoteConstraint]);
+const queryRemoteLeft = defineQuery([HeldRemoteLeft, OffersRemoteConstraint, Not(SnapPlacing)]);
 const queryEnterRemoteLeft = enterQuery(queryRemoteLeft);
 const queryExitRemoteLeft = exitQuery(queryRemoteLeft);
 
-const queryHandRight = defineQuery([HeldHandRight, OffersHandConstraint]);
+const queryHandRight = defineQuery([HeldHandRight, OffersHandConstraint, Not(SnapPlacing)]);
 const queryEnterHandRight = enterQuery(queryHandRight);
 const queryExitHandRight = exitQuery(queryHandRight);
 
-const queryHandLeft = defineQuery([HeldHandLeft, OffersHandConstraint]);
+const queryHandLeft = defineQuery([HeldHandLeft, OffersHandConstraint, Not(SnapPlacing)]);
 const queryEnterHandLeft = enterQuery(queryHandLeft);
 const queryExitHandLeft = exitQuery(queryHandLeft);
 
