@@ -234,6 +234,11 @@ export class EnvironmentSystem {
       this.scene.background = settings.backgroundColor;
     }
 
+    // Небо и происхождение карты окружения нужны day-night-system: она вправе крутить
+    // солнце и пересобирать env-map только если та сделана из неба, а не задана сценой.
+    this.skybox = settings.skybox || null;
+    this.envMapFromSkybox = !settings.envMapTexture && !!settings.skybox;
+
     if (settings.envMapTexture) {
       if (this.prevEnvMapTextureUUID !== settings.envMapTexture.uuid) {
         this.prevEnvMapTextureUUID = settings.envMapTexture.uuid;

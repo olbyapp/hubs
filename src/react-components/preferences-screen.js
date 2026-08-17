@@ -477,6 +477,14 @@ const preferenceLabels = defineMessages({
     id: "preferences-screen.preference.enable-dynamic-shadows",
     defaultMessage: "Enable Real-time Shadows"
   },
+  enableDayNightCycle: {
+    id: "preferences-screen.preference.enable-day-night-cycle",
+    defaultMessage: "Day/Night Cycle"
+  },
+  enableDayNightCycleTooltip: {
+    id: "preferences-screen.preference.enable-day-night-cycle-tooltip",
+    defaultMessage: "Light the room from the real position of the sun over the office."
+  },
   disableAutoPixelRatio: {
     id: "preferences-screen.preference.disable-auto-pixel-ratio",
     defaultMessage: "Disable automatic pixel ratio adjustments"
@@ -1349,6 +1357,11 @@ class PreferencesScreen extends Component {
           {
             key: "enableDynamicShadows",
             prefType: PREFERENCE_LIST_ITEM_TYPE.CHECK_BOX
+          },
+          {
+            key: "enableDayNightCycle",
+            prefType: PREFERENCE_LIST_ITEM_TYPE.CHECK_BOX,
+            tooltipKey: "enableDayNightCycleTooltip"
           },
           {
             key: "disableAutoPixelRatio",

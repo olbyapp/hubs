@@ -140,6 +140,7 @@ export const SCHEMA = {
         snapRotationDegrees: { type: "number", default: 45 },
         materialQualitySetting: { type: "string", default: defaultMaterialQuality },
         enableDynamicShadows: { type: "bool", default: false },
+        enableDayNightCycle: { type: "bool", default: true },
         disableSoundEffects: { type: "bool", default: false },
         disableMovement: { type: "bool", default: false },
         disableBackwardsMovement: { type: "bool", default: false },

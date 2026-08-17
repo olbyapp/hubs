@@ -29,6 +29,7 @@ import { EmojiSystem } from "./emoji-system";
 import { AudioZonesSystem } from "./audio-zones-system";
 import { GainSystem } from "./audio-gain-system";
 import { EnvironmentSystem } from "./environment-system";
+import { DayNightSystem } from "./day-night-system";
 import { NameTagVisibilitySystem } from "./name-tag-visibility-system";
 import { MediaPDFOculusFix } from "./media-pdf-oculus-fix";
 
@@ -151,6 +152,7 @@ AFRAME.registerSystem("hubs-systems", {
     this.audioZonesSystem = new AudioZonesSystem();
     this.gainSystem = new GainSystem();
     this.environmentSystem = new EnvironmentSystem(this.el);
+    this.dayNightSystem = new DayNightSystem(this.el);
     this.nameTagSystem = new NameTagVisibilitySystem(this.el);
 
     window.$S = this;
@@ -282,6 +284,8 @@ export function mainTick(xrFrame: XRFrame, renderer: WebGLRenderer, scene: Scene
   hubsSystems.spriteSystem.tick(t, dt);
   hubsSystems.uvScrollSystem.tick(dt);
   uvScrollSystem(world);
+  // Строго перед shadowSystem: тот подгоняет фрустум теней под уже повёрнутое солнце.
+  hubsSystems.dayNightSystem.tick();
   hubsSystems.shadowSystem.tick();
   objectMenuSystem(world, sceneEl.is("frozen"), APP.hubChannel!);
   linkedMenuSystem(world);

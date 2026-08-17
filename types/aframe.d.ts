@@ -65,6 +65,7 @@ declare module "aframe" {
     audioZonesSystem: AudioZonesSystem;
     gainSystem: GainSystem;
     environmentSystem: EnvironmentSystem;
+    dayNightSystem: DayNightSystem;
     nameTagSystem: NameTagVisibilitySystem;
 
     DOMContentDidLoad: bool;
