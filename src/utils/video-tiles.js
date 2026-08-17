@@ -1,10 +1,18 @@
 import { getPlayerInfo } from "./component-utils";
 import { getPresenceProfileForSession } from "./phoenix-utils";
+import { calculateAttenuation } from "../systems/audio-gain-system";
 
-// Tiles only show people close enough to talk to, so the panel mirrors walking
-// up to someone rather than listing the whole room. Roughly where avatar audio
-// has faded out (AvatarAudioDefaults: refDistance 5, rolloffFactor 5).
-export const TILE_AUDIBLE_DISTANCE = 12;
+// Tiles show the people you are in earshot of, so the panel mirrors walking up
+// to someone rather than listing the whole room. The test is how loud they
+// actually reach you — the same distance model the audio itself uses, plus any
+// gain an audio zone imposes — not plain distance, which counted people you
+// could barely hear through a wall or from another zone as neighbours.
+// At avatar defaults (inverse, refDistance 5, rolloff 5) this is about 8 metres.
+const TILE_AUDIBILITY_THRESHOLD = 0.25;
+// Used only for people with no audio node yet: someone who has never switched
+// their mic on has nothing to attenuate, and they should still get a tile when
+// they are standing next to you sharing a screen.
+const TILE_FALLBACK_DISTANCE = 8;
 
 const localPosition = new THREE.Vector3();
 const remotePosition = new THREE.Vector3();
@@ -38,6 +46,19 @@ function getRemoteVideoTracks() {
   return tracksBySession;
 }
 
+// How loudly this person reaches the listener, 0..1, or null when they have no
+// audio to judge by. Deliberately ignores mute and per-person volume: those say
+// what you want to hear, while a tile is about whether they are near enough to
+// be part of your conversation.
+function audibilityOf(playerInfoEl) {
+  const audioEl = playerInfoEl.querySelector("[avatar-audio-source]");
+  const audio = audioEl && APP.audios.get(audioEl);
+  if (!audio || !APP.audioListener) return null;
+  const zoneOverrides = APP.zoneOverrides.get(audioEl);
+  const zoneGain = zoneOverrides && zoneOverrides.gain !== undefined ? zoneOverrides.gain : 1;
+  return zoneGain * calculateAttenuation(audioEl, audio);
+}
+
 function displayNameFor(presences, sessionId) {
   const profile = getPresenceProfileForSession(presences, sessionId);
   return (profile && profile.displayName) || "";
@@ -66,8 +87,15 @@ export function collectVideoTiles(presences, mySessionId) {
     if (sessionId === mySessionId) return;
     const playerInfo = getPlayerInfo(sessionId);
     if (!playerInfo || !playerInfo.el) return;
-    playerInfo.el.object3D.getWorldPosition(remotePosition);
-    if (remotePosition.distanceTo(localPosition) > TILE_AUDIBLE_DISTANCE) return;
+
+    const audibility = audibilityOf(playerInfo.el);
+    if (audibility === null) {
+      playerInfo.el.object3D.getWorldPosition(remotePosition);
+      if (remotePosition.distanceTo(localPosition) > TILE_FALLBACK_DISTANCE) return;
+    } else if (audibility < TILE_AUDIBILITY_THRESHOLD) {
+      return;
+    }
+
     tiles.push({
       key: `${sessionId}-${track.id}`,
       sessionId,

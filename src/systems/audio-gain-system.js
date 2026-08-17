@@ -16,7 +16,9 @@ const distanceModels = {
   }
 };
 
-const calculateAttenuation = (() => {
+// Exported so the video tile panel can ask how well you actually hear someone
+// rather than guessing from raw distance.
+export const calculateAttenuation = (() => {
   const listenerPos = new THREE.Vector3();
   const sourcePos = new THREE.Vector3();
   return (el, audio) => {

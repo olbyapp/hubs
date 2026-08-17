@@ -25,8 +25,10 @@ import { paths } from "./userinput/paths";
 //
 // Здесь объект вместо констрейнта остаётся kinematic (констрейнт-систему обходим
 // через Not(SnapPlacing) в её запросах), а мировой трансформ каждый кадр считает
-// эта система: луч из курсора в геометрию сцены даёт точку и нормаль, по нормали
-// строится базис, и объект прижимается к поверхности лицевой стороной наружу.
+// эта система: луч из курсора даёт точку и нормаль, по нормали строится базис, и
+// объект прижимается к поверхности лицевой стороной наружу. Целями служат и
+// геометрия сцены, и другие медиа — чтобы фото можно было положить на рамку,
+// а не только на стену за ней.
 //
 // Физика при этом не мешает: kinematic-тела physics-system только читает из
 // object3D (см. ветку `if (type === TYPE.DYNAMIC)` в её tick), поэтому наши
@@ -75,6 +77,8 @@ const placingState = new Map();
 const raycaster = new THREE.Raycaster();
 raycaster.firstHitOnly = true; // флаг three-mesh-bvh, как в cursor-controller
 const intersections = [];
+const rayTargets = [];
+const EMPTY_TARGETS = [];
 
 const xAxis = new THREE.Vector3();
 const yAxis = new THREE.Vector3();
@@ -173,6 +177,35 @@ export function shouldSnapPlace(world, eid) {
   // спорить с нашими записями в трансформ.
   if (!hasComponent(world, Rigidbody, eid)) return false;
   return isPlaceableMedia(world, eid);
+}
+
+/**
+ * Годится ли попадание как поверхность для прилипания.
+ *
+ * Заспавненное медиа висит в корне сцены, а не в #objects-root (см. addMedia в
+ * utils/media-utils), поэтому «все объекты» одним поддеревом не возьмёшь — цели
+ * приходится брать из cursor-targetting-system и фильтровать попадания здесь.
+ *
+ * Принимаем только геометрию сцены и другие медиа. Всё прочее — меню, аватары,
+ * коллайдеры инспектора — отсекаем: прилипнуть к чужому меню было бы сюрпризом.
+ * Проверка на сам переносимый объект идёт первой, иначе он поймал бы сам себя.
+ */
+function isAcceptableSurface(world, hitObject, heldObj, envRoot) {
+  for (let node = hitObject; node; node = node.parent) {
+    if (node === heldObj) return false;
+    if (envRoot && node === envRoot) return true;
+    if (node.eid && hasComponent(world, MediaLoader, node.eid)) return true;
+    if (node.el?.components?.["media-loader"]) return true;
+  }
+  return false;
+}
+
+function findAcceptableHit(world, heldObj, envRoot) {
+  for (let i = 0; i < intersections.length; i++) {
+    const hit = intersections[i];
+    if (hit.face && isAcceptableSurface(world, hit.object, heldObj, envRoot)) return hit;
+  }
+  return null;
 }
 
 function getEnvironmentRoot() {
@@ -389,7 +422,7 @@ function stopPlacing(world, eid) {
   if (entityExists(world, eid)) removeComponent(world, SnapPlacing, eid);
 }
 
-export function placementSnapSystem(world, userinput, physicsSystem, sceneEl, dt) {
+export function placementSnapSystem(world, userinput, physicsSystem, cursorTargettingSystem, sceneEl, dt) {
   if (!snapPlacementEnabled()) {
     snapQuery(world).forEach(eid => stopPlacing(world, eid));
     hideGhost();
@@ -413,6 +446,7 @@ export function placementSnapSystem(world, userinput, physicsSystem, sceneEl, dt
 
   const camera = sceneEl.camera;
   const envRoot = getEnvironmentRoot();
+  const cursorTargets = cursorTargettingSystem?.targets || EMPTY_TARGETS;
   const transformSystem = sceneEl.systems["transform-selected-object"];
   let drewGhost = false;
 
@@ -447,10 +481,19 @@ export function placementSnapSystem(world, userinput, physicsSystem, sceneEl, dt
     raycaster.near = 0.01;
     raycaster.far = MAX_RAY_DISTANCE;
     intersections.length = 0;
-    if (envRoot && !freeMode) raycaster.intersectObject(envRoot, true, intersections);
-    const hit = intersections[0];
+    let hit = null;
+    if (!freeMode) {
+      rayTargets.length = 0;
+      if (envRoot) rayTargets.push(envRoot);
+      // Тут же лежат и медиа-объекты: cursor-targetting-system собирает их по
+      // .interactable и по компоненту CursorRaycastable. Лишние цели (меню,
+      // аватары) отсеет фильтр попаданий.
+      for (let t = 0; t < cursorTargets.length; t++) rayTargets.push(cursorTargets[t]);
+      raycaster.intersectObjects(rayTargets, true, intersections);
+      hit = findAcceptableHit(world, obj, envRoot);
+    }
 
-    if (hit && hit.face) {
+    if (hit) {
       normalMatrix.getNormalMatrix(hit.object.matrixWorld);
       surfaceNormal.copy(hit.face.normal).applyNormalMatrix(normalMatrix).normalize();
       // Стены в сценах Spoke часто односторонние, и нормаль может смотреть

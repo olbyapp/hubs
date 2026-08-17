@@ -223,7 +223,14 @@ export function mainTick(xrFrame: XRFrame, renderer: WebGLRenderer, scene: Scene
   // После floatyObjectSystem: она переводит объект в dynamic только при появлении
   // Constraint, а у snap-объектов констрейнта нет, так что они остаются kinematic
   // и наши записи в трансформ доживают до конца кадра.
-  placementSnapSystem(world, aframeSystems.userinput, hubsSystems.physicsSystem, sceneEl, dt);
+  placementSnapSystem(
+    world,
+    aframeSystems.userinput,
+    hubsSystems.physicsSystem,
+    hubsSystems.cursorTargettingSystem,
+    sceneEl,
+    dt
+  );
 
   hoverableVisualsSystem(world);
 
