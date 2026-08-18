@@ -3,7 +3,9 @@ import { STATUS_COLORS } from "./user-status";
 // Status glyphs are painted into a canvas rather than shipped as image assets:
 // the nametag font is MSDF and has no emoji glyphs, and a canvas keeps the icon
 // and its colour ring in one place with no new binaries in the repo.
-const STATUS_GLYPHS = {
+// Exported because the video tiles draw the same glyph in the DOM, where the
+// MSDF limitation does not apply but the icon should still read as one signal.
+export const STATUS_GLYPHS = {
   none: "🙂",
   work: "💼",
   eat: "🍔",

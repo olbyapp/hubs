@@ -106,19 +106,90 @@
   display: block;
 }
 
-:local(.label) {
+// Bottom-left corner of every tile: microphone, status, and — when there is a
+// picture behind it — the name. One strip so the three never collide on an 88px
+// tile, and one backdrop so all three stay readable over a bright video frame.
+:local(.badges) {
   position: absolute;
   left: 0;
   bottom: 0;
   max-width: 100%;
-  padding: 2px 6px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px 2px 4px;
   background-color: rgba(0, 0, 0, 0.55);
+  border-top-right-radius: 6px;
+  overflow: hidden;
+}
+
+:local(.mic-badge) {
+  display: flex;
+  flex: 0 0 auto;
+  color: white;
+
+  svg {
+    width: 14px;
+    height: 14px;
+  }
+}
+
+// Off reads as a warning, on reads as neutral: the interesting state is the one
+// where someone is talking into a microphone nobody can hear.
+:local(.mic-badge-muted) {
+  color: theme.$red;
+}
+
+// Same colour ring and glyph as the in-world name tag carries, so the tile and
+// the avatar say the same thing. No text: there is no room for any.
+:local(.status-badge) {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  font-size: 9px;
+  line-height: 1;
+}
+
+:local(.label) {
   color: white;
   font-size: theme.$font-size-xs;
-  border-top-right-radius: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+// Camera off, but they are still standing next to you: the tile stays in the
+// panel and shows who it belongs to. Lighter than the black behind a video, so
+// "no camera" does not read as "camera on, pointing at the dark".
+:local(.placeholder) {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px 16px;
+  background-color: #1f2124;
+}
+
+:local(.placeholder-name) {
+  max-width: 100%;
+  color: white;
+  font-size: 16px;
+  font-weight: theme.$font-weight-bold;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// The spotlight is many times the size of a strip tile, and a 16px name in the
+// middle of it reads as a mistake.
+:local(.fill) :local(.placeholder-name) {
+  font-size: 32px;
 }
 
 // Doubled, and after .column on purpose: it has to outrank the display: flex of

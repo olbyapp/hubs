@@ -1,6 +1,6 @@
-import { getPlayerInfo } from "./component-utils";
 import { getPresenceProfileForSession } from "./phoenix-utils";
 import { calculateAttenuation } from "../systems/audio-gain-system";
+import { privateZoneSilences } from "./private-zone";
 
 // Tiles show the people you are in earshot of, so the panel mirrors walking up
 // to someone rather than listing the whole room. The test is how loud they
@@ -11,7 +11,7 @@ import { calculateAttenuation } from "../systems/audio-gain-system";
 const TILE_AUDIBILITY_THRESHOLD = 0.25;
 // Used only for people with no audio node yet: someone who has never switched
 // their mic on has nothing to attenuate, and they should still get a tile when
-// they are standing next to you sharing a screen.
+// they are standing next to you.
 const TILE_FALLBACK_DISTANCE = 8;
 
 const localPosition = new THREE.Vector3();
@@ -59,23 +59,47 @@ function audibilityOf(playerInfoEl) {
   return zoneGain * calculateAttenuation(audioEl, audio);
 }
 
+function isNeighbour(playerInfo) {
+  // A private zone, yours or theirs, is the whole answer when it applies: it
+  // silences them, so they are not part of your conversation at all.
+  if (privateZoneSilences(playerInfo)) return false;
+
+  const audibility = audibilityOf(playerInfo.el);
+  if (audibility !== null) return audibility >= TILE_AUDIBILITY_THRESHOLD;
+
+  playerInfo.el.object3D.getWorldPosition(remotePosition);
+  return remotePosition.distanceTo(localPosition) <= TILE_FALLBACK_DISTANCE;
+}
+
 function displayNameFor(presences, sessionId) {
   const profile = getPresenceProfileForSession(presences, sessionId);
   return (profile && profile.displayName) || "";
 }
 
+function statusFor(presences, sessionId) {
+  const profile = getPresenceProfileForSession(presences, sessionId);
+  return (profile && profile.status) || "none";
+}
+
+// Everyone within earshot gets a tile, camera or no camera: the panel is the
+// list of people you are talking to, and someone with their camera off is still
+// one of them — their tile just carries their name instead of a picture.
 export function collectVideoTiles(presences, mySessionId) {
   const tiles = [];
 
   const localTrack = getLocalVideoTrack();
   if (localTrack) {
     tiles.push({
-      key: `local-${localTrack.id}`,
+      // Keyed by session rather than by track: the tile survives switching
+      // between camera and screenshare, so the spotlight does not close.
+      key: mySessionId || "local",
       sessionId: mySessionId,
       isLocal: true,
       isScreen: localTrack._hubs_contentHint === "screen",
       name: displayNameFor(presences, mySessionId),
-      track: localTrack
+      track: localTrack,
+      micMuted: !(APP.mediaDevicesManager && APP.mediaDevicesManager.isMicEnabled),
+      status: statusFor(presences, mySessionId)
     });
   }
 
@@ -83,28 +107,25 @@ export function collectVideoTiles(presences, mySessionId) {
   if (!avatarRig) return tiles;
   avatarRig.object3D.getWorldPosition(localPosition);
 
-  getRemoteVideoTracks().forEach((track, sessionId) => {
-    if (sessionId === mySessionId) return;
-    const playerInfo = getPlayerInfo(sessionId);
-    if (!playerInfo || !playerInfo.el) return;
-
-    const audibility = audibilityOf(playerInfo.el);
-    if (audibility === null) {
-      playerInfo.el.object3D.getWorldPosition(remotePosition);
-      if (remotePosition.distanceTo(localPosition) > TILE_FALLBACK_DISTANCE) return;
-    } else if (audibility < TILE_AUDIBILITY_THRESHOLD) {
-      return;
-    }
+  const remoteTracks = getRemoteVideoTracks();
+  const playerInfos = (APP.componentRegistry && APP.componentRegistry["player-info"]) || [];
+  for (const playerInfo of playerInfos) {
+    if (playerInfo.isLocalPlayerInfo || !playerInfo.el) continue;
+    const sessionId = playerInfo.playerSessionId;
+    if (!sessionId || sessionId === mySessionId) continue;
+    if (!isNeighbour(playerInfo)) continue;
 
     tiles.push({
-      key: `${sessionId}-${track.id}`,
+      key: sessionId,
       sessionId,
       isLocal: false,
       isScreen: false,
-      name: displayNameFor(presences, sessionId),
-      track
+      name: displayNameFor(presences, sessionId) || playerInfo.displayName || "",
+      track: remoteTracks.get(sessionId) || null,
+      micMuted: !!playerInfo.data.muted,
+      status: statusFor(presences, sessionId)
     });
-  });
+  }
 
   return tiles;
 }
@@ -112,7 +133,16 @@ export function collectVideoTiles(presences, mySessionId) {
 export function sameTiles(a, b) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    if (a[i].key !== b[i].key || a[i].name !== b[i].name) return false;
+    if (
+      a[i].key !== b[i].key ||
+      a[i].name !== b[i].name ||
+      a[i].track !== b[i].track ||
+      a[i].isScreen !== b[i].isScreen ||
+      a[i].micMuted !== b[i].micMuted ||
+      a[i].status !== b[i].status
+    ) {
+      return false;
+    }
   }
   return true;
 }

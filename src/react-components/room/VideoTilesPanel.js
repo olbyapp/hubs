@@ -7,6 +7,10 @@ import ResizeObserver from "resize-observer-polyfill";
 import styles from "./VideoTilesPanel.scss";
 import { collectTalkingSessions, collectVideoTiles, sameSessions, sameTiles } from "../../utils/video-tiles";
 import { useTopDownActive } from "./useTopDownActive";
+import { ReactComponent as MicrophoneIcon } from "../icons/Microphone.svg";
+import { ReactComponent as MicrophoneMutedIcon } from "../icons/MicrophoneMuted.svg";
+import { STATUS_COLORS, STATUS_DISPLAY_NAMES } from "../../utils/user-status";
+import { STATUS_GLYPHS } from "../../utils/status-icons";
 
 const ROSTER_POLL_MS = 500;
 // Who is speaking is polled far more often than the roster: half a second of lag
@@ -44,8 +48,38 @@ const tileShape = PropTypes.shape({
   name: PropTypes.string,
   isLocal: PropTypes.bool,
   isScreen: PropTypes.bool,
-  track: PropTypes.object.isRequired
+  // Null when their camera is off: the tile then carries their name instead.
+  track: PropTypes.object,
+  micMuted: PropTypes.bool,
+  status: PropTypes.string
 });
+
+// The two badges every tile carries in its bottom-left corner: whether their
+// microphone is on, and their status. Both are icon-only — the tile is as small
+// as 88px wide, and the name already has the rest of that corner.
+function TileBadges({ micMuted, status }) {
+  const known = status && STATUS_GLYPHS[status] ? status : "none";
+  const MicIcon = micMuted ? MicrophoneMutedIcon : MicrophoneIcon;
+  return (
+    <>
+      <span className={classNames(styles.micBadge, { [styles.micBadgeMuted]: micMuted })}>
+        <MicIcon />
+      </span>
+      <span
+        className={styles.statusBadge}
+        style={{ backgroundColor: STATUS_COLORS[known] }}
+        title={STATUS_DISPLAY_NAMES[known]}
+      >
+        {STATUS_GLYPHS[known]}
+      </span>
+    </>
+  );
+}
+
+TileBadges.propTypes = {
+  micMuted: PropTypes.bool,
+  status: PropTypes.string
+};
 
 // Reports the content box of a node, tracking it as the viewport changes. Takes
 // the node itself, not a ref: these blocks mount and unmount as people start and
@@ -76,7 +110,7 @@ function VideoTile({ tile, size, style, talking, onClick, onToggleFullscreen, fu
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !tile.track) return;
     video.srcObject = new MediaStream([tile.track]);
     // Autoplay can still be refused; the tile then shows the first frame only.
     video.play().catch(() => {});
@@ -85,6 +119,23 @@ function VideoTile({ tile, size, style, talking, onClick, onToggleFullscreen, fu
     };
   }, [tile.track]);
 
+  // The same tile is drawn anywhere from 88px wide in the strip to half the
+  // screen in the spotlight, and a name is only useful if it fits: the size is
+  // taken from the width the layout handed us. Tiles sized by CSS instead (the
+  // spotlight) fall through to the stylesheet.
+  const placeholderFontSize =
+    style && style.width ? Math.max(11, Math.min(28, Math.round(style.width / 8))) : undefined;
+
+  const label = tile.isLocal ? (
+    tile.isScreen ? (
+      <FormattedMessage id="video-tiles.your-screen" defaultMessage="Your screen" />
+    ) : (
+      <FormattedMessage id="video-tiles.you" defaultMessage="You" />
+    )
+  ) : (
+    tile.name
+  );
+
   return (
     <div
       className={classNames(styles.tile, styles[size], { [styles.talking]: talking })}
@@ -92,18 +143,20 @@ function VideoTile({ tile, size, style, talking, onClick, onToggleFullscreen, fu
       onClick={onClick}
       role="presentation"
     >
-      {/* Muted on purpose: voice already arrives through the spatial audio mix. */}
-      <video ref={videoRef} className={styles.video} muted playsInline autoPlay />
-      <span className={styles.label}>
-        {tile.isLocal ? (
-          tile.isScreen ? (
-            <FormattedMessage id="video-tiles.your-screen" defaultMessage="Your screen" />
-          ) : (
-            <FormattedMessage id="video-tiles.you" defaultMessage="You" />
-          )
-        ) : (
-          tile.name
-        )}
+      {tile.track ? (
+        /* Muted on purpose: voice already arrives through the spatial audio mix. */
+        <video ref={videoRef} className={styles.video} muted playsInline autoPlay />
+      ) : (
+        <div className={styles.placeholder}>
+          <span className={styles.placeholderName} style={{ fontSize: placeholderFontSize }}>
+            {label}
+          </span>
+        </div>
+      )}
+      <span className={styles.badges}>
+        <TileBadges micMuted={tile.micMuted} status={tile.status} />
+        {/* Repeating the name under a placeholder would only crowd it out. */}
+        {tile.track && <span className={styles.label}>{label}</span>}
       </span>
       {onToggleFullscreen && (
         <button
@@ -303,9 +356,9 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
         {tiles.length > 1 && (
           <button className={styles.expandButton} onClick={toggleGrid} type="button" ref={setButtonNode}>
             {showGrid ? (
-              <FormattedMessage id="video-tiles.collapse" defaultMessage="Close tiles" />
+              <FormattedMessage id="video-tiles.collapse" defaultMessage="Minimize" />
             ) : (
-              <FormattedMessage id="video-tiles.expand" defaultMessage="Show all tiles" />
+              <FormattedMessage id="video-tiles.expand" defaultMessage="Maximize" />
             )}
           </button>
         )}
