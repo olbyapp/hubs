@@ -212,14 +212,16 @@ export function PeopleSidebar({
                 {onCallPerson && !person.isMe && person.presence === "room" && !person.context?.discord && (
                   <ToolTip
                     classProp="tooltip"
-                    location="bottom"
+                    // Opens leftwards, into the panel: this button sits hard
+                    // against the right edge, and the tooltip is anchored to the
+                    // side it grows from — "bottom" grows right, off the screen.
+                    location="left"
                     description={intl.formatMessage(callDescription, { name: person.profile.displayName })}
                   >
-                    <IconButton
-                      as="span"
+                    <span
+                      className={styles.callButton}
                       role="button"
                       tabIndex={0}
-                      className={styles.callButton}
                       onClick={e => {
                         // The row opens the profile; this does not.
                         e.stopPropagation();
@@ -232,8 +234,8 @@ export function PeopleSidebar({
                         onCallPerson(person);
                       }}
                     >
-                      <CallIcon width={16} height={16} />
-                    </IconButton>
+                      <CallIcon width={15} height={15} />
+                    </span>
                   </ToolTip>
                 )}
               </ButtonListItem>

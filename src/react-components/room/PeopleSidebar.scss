@@ -24,13 +24,33 @@
 }
 
 // Row action rather than row content, so it sits hard against the right edge
-// past the presence text (which is what stretches to fill the row).
+// past the presence text (which is what stretches to fill the row). Drawn as a
+// button rather than a bare glyph: the row is full of status icons, and an icon
+// among icons does not say "click me". Green because it places a call.
 :local(.call-button) {
   flex: 0 0 auto;
-  color: theme.$accent1-color;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 26px;
+  border: 1px solid theme.$button-border-color;
+  background-color: theme.$button-bg-color;
+  color: theme.$accept-color;
   cursor: pointer;
 
+  // The list gives its own icons a fixed colour; this one follows the button.
+  svg {
+    color: inherit;
+  }
+
   &:hover {
-    color: theme.$accent1-color-hover;
+    background-color: theme.$accept-color;
+    color: theme.$button-bg-color;
+  }
+
+  &:active {
+    background-color: theme.$accept-color-pressed;
   }
 }
