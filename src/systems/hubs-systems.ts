@@ -28,6 +28,7 @@ import { InspectYourselfSystem } from "./inspect-yourself-system";
 import { EmojiSystem } from "./emoji-system";
 import { AudioZonesSystem } from "./audio-zones-system";
 import { GainSystem } from "./audio-gain-system";
+import { PrivateZoneSystem } from "./private-zone-system";
 import { EnvironmentSystem } from "./environment-system";
 import { DayNightSystem } from "./day-night-system";
 import { NameTagVisibilitySystem } from "./name-tag-visibility-system";
@@ -151,6 +152,7 @@ AFRAME.registerSystem("hubs-systems", {
     this.emojiSystem = new EmojiSystem(this.el);
     this.audioZonesSystem = new AudioZonesSystem();
     this.gainSystem = new GainSystem();
+    this.privateZoneSystem = new PrivateZoneSystem();
     this.environmentSystem = new EnvironmentSystem(this.el);
     this.dayNightSystem = new DayNightSystem(this.el);
     this.nameTagSystem = new NameTagVisibilitySystem(this.el);
@@ -300,6 +302,9 @@ export function mainTick(xrFrame: XRFrame, renderer: WebGLRenderer, scene: Scene
   audioZoneSystem(world);
   audioEmitterSystem(world, hubsSystems.audioSystem);
   audioTargetSystem(world, hubsSystems.audioSystem);
+  // Before the gain system: it recomputes settings for everything it touches,
+  // so a change made here lands in the same frame.
+  hubsSystems.privateZoneSystem.tick(t);
   hubsSystems.gainSystem.tick();
   hubsSystems.nameTagSystem.tick();
   simpleWaterSystem(world);

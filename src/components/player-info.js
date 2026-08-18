@@ -38,7 +38,10 @@ AFRAME.registerComponent("player-info", {
     avatarSrc: { type: "string" },
     avatarType: { type: "string", default: AVATAR_TYPES.SKINNABLE },
     muted: { default: false },
-    isSharingAvatarCamera: { default: false }
+    isSharingAvatarCamera: { default: false },
+    // Networked so everyone else's client can apply the same private zone rule
+    // to us that we apply to them. See utils/private-zone.js.
+    privateZone: { default: false }
   },
   init() {
     this.applyProperties = this.applyProperties.bind(this);
