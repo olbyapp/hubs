@@ -22,3 +22,15 @@
   flex: 1;
   justify-content: flex-end;
 }
+
+// Row action rather than row content, so it sits hard against the right edge
+// past the presence text (which is what stretches to fill the row).
+:local(.call-button) {
+  flex: 0 0 auto;
+  color: theme.$accent1-color;
+  cursor: pointer;
+
+  &:hover {
+    color: theme.$accent1-color-hover;
+  }
+}

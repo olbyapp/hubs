@@ -16,6 +16,7 @@ import { ReactComponent as VolumeMutedIcon } from "../icons/VolumeMuted.svg";
 import { ReactComponent as HandRaisedIcon } from "../icons/HandRaised.svg";
 import { ReactComponent as UserSoundOnIcon } from "../icons/UserSoundOn.svg";
 import { ReactComponent as UserSoundOffIcon } from "../icons/UserSoundOff.svg";
+import { ReactComponent as CallIcon } from "../icons/Call.svg";
 import { List, ButtonListItem } from "../layout/List";
 import { FormattedMessage, defineMessage, useIntl } from "react-intl";
 import { PermissionNotification } from "./PermissionNotifications";
@@ -35,6 +36,11 @@ StatusLabel.propTypes = {
 const toolTipDescription = defineMessage({
   id: "people-sidebar.muted-tooltip",
   defaultMessage: "User is {mutedState}"
+});
+
+const callDescription = defineMessage({
+  id: "people-sidebar.call-tooltip",
+  defaultMessage: "Call {name}"
 });
 
 function getDeviceLabel(ctx, intl) {
@@ -115,6 +121,7 @@ function getPersonName(person, intl) {
 export function PeopleSidebar({
   people,
   onSelectPerson,
+  onCallPerson,
   onClose,
   showMuteAll,
   onMuteAll,
@@ -199,6 +206,36 @@ export function PeopleSidebar({
                   />
                 )}
                 <p className={styles.presence}>{getPresenceMessage(person.presence, intl)}</p>
+                {/* Only people actually in the room: a call is a data channel
+                    message, and the lobby is not on that channel. Rendered as a
+                    span rather than a button because the row is itself one. */}
+                {onCallPerson && !person.isMe && person.presence === "room" && !person.context?.discord && (
+                  <ToolTip
+                    classProp="tooltip"
+                    location="bottom"
+                    description={intl.formatMessage(callDescription, { name: person.profile.displayName })}
+                  >
+                    <IconButton
+                      as="span"
+                      role="button"
+                      tabIndex={0}
+                      className={styles.callButton}
+                      onClick={e => {
+                        // The row opens the profile; this does not.
+                        e.stopPropagation();
+                        onCallPerson(person);
+                      }}
+                      onKeyDown={e => {
+                        if (e.key !== "Enter" && e.key !== " ") return;
+                        e.stopPropagation();
+                        e.preventDefault();
+                        onCallPerson(person);
+                      }}
+                    >
+                      <CallIcon width={16} height={16} />
+                    </IconButton>
+                  </ToolTip>
+                )}
               </ButtonListItem>
             );
           })}
@@ -210,6 +247,7 @@ export function PeopleSidebar({
 PeopleSidebar.propTypes = {
   people: PropTypes.array,
   onSelectPerson: PropTypes.func,
+  onCallPerson: PropTypes.func,
   showMuteAll: PropTypes.bool,
   onMuteAll: PropTypes.func,
   onClose: PropTypes.func,

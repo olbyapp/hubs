@@ -47,6 +47,13 @@ function usePeopleList(presences, mySessionId, micUpdateFrequency = 500) {
 }
 
 function PeopleListContainer({ hubChannel, people, onSelectPerson, onClose }) {
+  // Same path the avatar's own Call button takes, so the AFK check, the chat
+  // line and the ring all behave identically wherever the call starts.
+  const onCallPerson = useCallback(person => {
+    const scene = APP.scene || AFRAME.scenes[0];
+    if (scene) scene.emit("action_call_client", { clientId: person.id });
+  }, []);
+
   const onMuteAll = useCallback(() => {
     for (const person of people) {
       if (person.presence === "room" && person.permissions && !person.permissions.mute_users) {
@@ -62,6 +69,7 @@ function PeopleListContainer({ hubChannel, people, onSelectPerson, onClose }) {
     <PeopleSidebar
       people={people}
       onSelectPerson={onSelectPerson}
+      onCallPerson={onCallPerson}
       onClose={onClose}
       onMuteAll={onMuteAll}
       showMuteAll={hubChannel.can("mute_users")}
