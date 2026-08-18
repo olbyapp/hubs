@@ -307,7 +307,12 @@ export default class SceneEntryManager {
         });
         return;
       }
-      NAF.connection.sendDataGuaranteed(clientId, "call", { from: NAF.clientId });
+      // The recipient is repeated inside the payload because the clientId
+      // argument does not actually address anything: Reticulum broadcasts every
+      // naf/nafr message to the whole hub and the client hands all of them to
+      // the subscriber, so this "addressed" send reaches everyone. The callee is
+      // the one who checks it.
+      NAF.connection.sendDataGuaranteed(clientId, "call", { from: NAF.clientId, to: clientId });
       window.APP.hubChannel.sendMessage(`📞 calling ${targetName}!`);
     });
 

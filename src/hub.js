@@ -1194,7 +1194,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Incoming "call" (vegamix): ring unless we are AFK. Rings through the SFX
   // mixer, which quiet statuses deliberately leave at full volume.
-  NAF.connection.subscribeToDataChannel("call", senderId => {
+  NAF.connection.subscribeToDataChannel("call", (senderId, dataType, data) => {
+    // Everyone in the room receives this message — see the note where it is
+    // sent — so the ring is ours only if we are the one being called. Messages
+    // with no addressee at all come from a client older than this check and are
+    // left alone rather than dropped, so a call across a rollout still rings.
+    if (data && data.to && data.to !== NAF.clientId) return;
     const myStatus = (APP.store.state.profile && APP.store.state.profile.status) || "none";
     if (myStatus === "afk") return;
     const senderState = hubChannel.presence.state[senderId];
