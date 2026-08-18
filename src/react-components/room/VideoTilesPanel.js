@@ -10,7 +10,8 @@ import { useTopDownActive } from "./useTopDownActive";
 import { ReactComponent as MicrophoneIcon } from "../icons/Microphone.svg";
 import { ReactComponent as MicrophoneMutedIcon } from "../icons/MicrophoneMuted.svg";
 import { STATUS_COLORS, STATUS_DISPLAY_NAMES } from "../../utils/user-status";
-import { STATUS_GLYPHS } from "../../utils/status-icons";
+import { PRIVATE_ZONE_GLYPH, STATUS_GLYPHS } from "../../utils/status-icons";
+import { isPrivateZoneActive, onPrivateZoneChanged, PRIVATE_ZONE_COLOR } from "../../utils/private-zone";
 
 const ROSTER_POLL_MS = 500;
 // Who is speaking is polled far more often than the roster: half a second of lag
@@ -51,34 +52,51 @@ const tileShape = PropTypes.shape({
   // Null when their camera is off: the tile then carries their name instead.
   track: PropTypes.object,
   micMuted: PropTypes.bool,
-  status: PropTypes.string
+  status: PropTypes.string,
+  privateZone: PropTypes.bool
 });
 
-// The two badges every tile carries in its bottom-left corner: whether their
-// microphone is on, and their status. Both are icon-only — the tile is as small
-// as 88px wide, and the name already has the rest of that corner.
-function TileBadges({ micMuted, status }) {
+// The badges in a tile's bottom-left corner: whether their microphone is on,
+// their status, and — when it applies — that they are in a private zone. All
+// icon-only; the tile is as small as 88px wide and the name has the rest of
+// that corner. Sized by the caller from the tile's own width, so they grow with
+// it: fixed pixels left them as specks once a tile filled the middle of the
+// screen.
+function TileBadges({ micMuted, status, privateZone, size }) {
   const known = status && STATUS_GLYPHS[status] ? status : "none";
   const MicIcon = micMuted ? MicrophoneMutedIcon : MicrophoneIcon;
+  const box = size ? { width: size, height: size } : undefined;
+  const glyphBox = size ? { width: size, height: size, fontSize: Math.round(size * 0.62) } : undefined;
   return (
     <>
-      <span className={classNames(styles.micBadge, { [styles.micBadgeMuted]: micMuted })}>
+      <span className={classNames(styles.micBadge, { [styles.micBadgeMuted]: micMuted })} style={box}>
         <MicIcon />
       </span>
       <span
-        className={styles.statusBadge}
-        style={{ backgroundColor: STATUS_COLORS[known] }}
+        className={styles.glyphBadge}
+        style={{ ...glyphBox, backgroundColor: STATUS_COLORS[known] }}
         title={STATUS_DISPLAY_NAMES[known]}
       >
         {STATUS_GLYPHS[known]}
       </span>
+      {privateZone && (
+        <span
+          className={styles.glyphBadge}
+          style={{ ...glyphBox, backgroundColor: PRIVATE_ZONE_COLOR }}
+          title="Private zone"
+        >
+          {PRIVATE_ZONE_GLYPH}
+        </span>
+      )}
     </>
   );
 }
 
 TileBadges.propTypes = {
   micMuted: PropTypes.bool,
-  status: PropTypes.string
+  status: PropTypes.string,
+  privateZone: PropTypes.bool,
+  size: PropTypes.number
 };
 
 // Reports the content box of a node, tracking it as the viewport changes. Takes
@@ -107,6 +125,7 @@ function useElementSize(node) {
 
 function VideoTile({ tile, size, style, talking, onClick, onToggleFullscreen, fullscreen }) {
   const videoRef = useRef(null);
+  const [tileNode, setTileNode] = useState(null);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -119,12 +138,20 @@ function VideoTile({ tile, size, style, talking, onClick, onToggleFullscreen, fu
     };
   }, [tile.track]);
 
-  // The same tile is drawn anywhere from 88px wide in the strip to half the
-  // screen in the spotlight, and a name is only useful if it fits: the size is
-  // taken from the width the layout handed us. Tiles sized by CSS instead (the
-  // spotlight) fall through to the stylesheet.
-  const placeholderFontSize =
-    style && style.width ? Math.max(11, Math.min(28, Math.round(style.width / 8))) : undefined;
+  // The same tile is drawn anywhere from 88px wide in the strip to most of the
+  // screen in the spotlight, so everything drawn on top of it is sized from the
+  // tile itself. Measured rather than taken from the style we were handed: the
+  // spotlight has no width of its own to read, it fills its container.
+  const { width: tileWidth } = useElementSize(tileNode);
+  const badgeSize = tileWidth ? Math.max(12, Math.min(40, Math.round(tileWidth / 11))) : 0;
+  const labelFontSize = tileWidth ? Math.max(9, Math.min(24, Math.round(tileWidth / 16))) : undefined;
+  const placeholderFontSize = tileWidth ? Math.max(12, Math.min(56, Math.round(tileWidth / 8))) : undefined;
+  const badgesStyle = badgeSize
+    ? {
+        gap: Math.round(badgeSize * 0.22),
+        padding: `${Math.round(badgeSize * 0.14)}px ${Math.round(badgeSize * 0.42)}px`
+      }
+    : undefined;
 
   const label = tile.isLocal ? (
     tile.isScreen ? (
@@ -142,6 +169,7 @@ function VideoTile({ tile, size, style, talking, onClick, onToggleFullscreen, fu
       style={style}
       onClick={onClick}
       role="presentation"
+      ref={setTileNode}
     >
       {tile.track ? (
         /* Muted on purpose: voice already arrives through the spatial audio mix. */
@@ -153,10 +181,14 @@ function VideoTile({ tile, size, style, talking, onClick, onToggleFullscreen, fu
           </span>
         </div>
       )}
-      <span className={styles.badges}>
-        <TileBadges micMuted={tile.micMuted} status={tile.status} />
+      <span className={styles.badges} style={badgesStyle}>
+        <TileBadges micMuted={tile.micMuted} status={tile.status} privateZone={tile.privateZone} size={badgeSize} />
         {/* Repeating the name under a placeholder would only crowd it out. */}
-        {tile.track && <span className={styles.label}>{label}</span>}
+        {tile.track && (
+          <span className={styles.label} style={{ fontSize: labelFontSize }}>
+            {label}
+          </span>
+        )}
       </span>
       {onToggleFullscreen && (
         <button
@@ -233,6 +265,7 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
   const [spotlightKey, setSpotlightKey] = useState(null);
   const [showGrid, setShowGrid] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [privateZone, setPrivateZone] = useState(isPrivateZoneActive);
   const [stripNode, setStripNode] = useState(null);
   const [buttonNode, setButtonNode] = useState(null);
   const [gridNode, setGridNode] = useState(null);
@@ -258,6 +291,9 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
     const interval = setInterval(update, TALKING_POLL_MS);
     return () => clearInterval(interval);
   }, [sessionId]);
+
+  // The 2D strip runs down the left edge, where the private zone badge sits.
+  useEffect(() => onPrivateZoneChanged(state => setPrivateZone(state.active)), []);
 
   const spotlight = useMemo(() => tiles.find(tile => tile.key === spotlightKey) || null, [tiles, spotlightKey]);
   const listed = useMemo(
@@ -350,7 +386,10 @@ export function VideoTilesPanel({ scene, presences, sessionId }) {
         )
       )}
       <div
-        className={classNames(topDown ? styles.column : styles.row, { [styles.hidden]: fullscreenActive })}
+        className={classNames(topDown ? styles.column : styles.row, {
+          [styles.hidden]: fullscreenActive,
+          [styles.belowPrivateBadge]: topDown && privateZone
+        })}
         ref={setStripNode}
       >
         {tiles.length > 1 && (

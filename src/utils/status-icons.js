@@ -1,4 +1,5 @@
 import { STATUS_COLORS } from "./user-status";
+import { PRIVATE_ZONE_COLOR } from "./private-zone";
 
 // Status glyphs are painted into a canvas rather than shipped as image assets:
 // the nametag font is MSDF and has no emoji glyphs, and a canvas keeps the icon
@@ -13,13 +14,15 @@ export const STATUS_GLYPHS = {
   afk: "💤"
 };
 
-const ICON_PIXELS = 128;
-const textureByStatus = new Map();
+// Same treatment for "this person is in a private zone".
+export const PRIVATE_ZONE_GLYPH = "👂";
 
-export function getStatusIconTexture(status) {
-  const glyph = STATUS_GLYPHS[status];
+const ICON_PIXELS = 128;
+const textureByKey = new Map();
+
+function getGlyphTexture(key, glyph, color) {
   if (!glyph) return null;
-  if (textureByStatus.has(status)) return textureByStatus.get(status);
+  if (textureByKey.has(key)) return textureByKey.get(key);
 
   const canvas = document.createElement("canvas");
   canvas.width = ICON_PIXELS;
@@ -27,7 +30,7 @@ export function getStatusIconTexture(status) {
   const context = canvas.getContext("2d");
   const centre = ICON_PIXELS / 2;
 
-  context.fillStyle = STATUS_COLORS[status] || "#ffffff";
+  context.fillStyle = color || "#ffffff";
   context.beginPath();
   context.arc(centre, centre, centre - 4, 0, Math.PI * 2);
   context.fill();
@@ -39,6 +42,14 @@ export function getStatusIconTexture(status) {
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
-  textureByStatus.set(status, texture);
+  textureByKey.set(key, texture);
   return texture;
+}
+
+export function getStatusIconTexture(status) {
+  return getGlyphTexture(`status:${status}`, STATUS_GLYPHS[status], STATUS_COLORS[status]);
+}
+
+export function getPrivateZoneIconTexture() {
+  return getGlyphTexture("private-zone", PRIVATE_ZONE_GLYPH, PRIVATE_ZONE_COLOR);
 }

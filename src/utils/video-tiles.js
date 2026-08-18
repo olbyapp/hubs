@@ -1,6 +1,6 @@
 import { getPresenceProfileForSession } from "./phoenix-utils";
 import { calculateAttenuation } from "../systems/audio-gain-system";
-import { privateZoneSilences } from "./private-zone";
+import { isSessionInPrivateZone, privateZoneSilences } from "./private-zone";
 
 // Tiles show the people you are in earshot of, so the panel mirrors walking up
 // to someone rather than listing the whole room. The test is how loud they
@@ -99,7 +99,8 @@ export function collectVideoTiles(presences, mySessionId) {
       name: displayNameFor(presences, mySessionId),
       track: localTrack,
       micMuted: !(APP.mediaDevicesManager && APP.mediaDevicesManager.isMicEnabled),
-      status: statusFor(presences, mySessionId)
+      status: statusFor(presences, mySessionId),
+      privateZone: isSessionInPrivateZone(mySessionId)
     });
   }
 
@@ -123,7 +124,8 @@ export function collectVideoTiles(presences, mySessionId) {
       name: displayNameFor(presences, sessionId) || playerInfo.displayName || "",
       track: remoteTracks.get(sessionId) || null,
       micMuted: !!playerInfo.data.muted,
-      status: statusFor(presences, sessionId)
+      status: statusFor(presences, sessionId),
+      privateZone: isSessionInPrivateZone(sessionId)
     });
   }
 
@@ -139,7 +141,8 @@ export function sameTiles(a, b) {
       a[i].track !== b[i].track ||
       a[i].isScreen !== b[i].isScreen ||
       a[i].micMuted !== b[i].micMuted ||
-      a[i].status !== b[i].status
+      a[i].status !== b[i].status ||
+      a[i].privateZone !== b[i].privateZone
     ) {
       return false;
     }

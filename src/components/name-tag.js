@@ -9,7 +9,8 @@ import { textureLoader } from "../utils/media-utils";
 
 import handRaisedIconSrc from "../assets/hud/hand-raised.png";
 import { STATUS_LABELS, STATUS_COLORS } from "../utils/user-status";
-import { getStatusIconTexture } from "../utils/status-icons";
+import { getPrivateZoneIconTexture, getStatusIconTexture } from "../utils/status-icons";
+import { isSessionInPrivateZone } from "../utils/private-zone";
 import { CAMERA_MODE_TOP_DOWN } from "../systems/camera-system";
 import { TOP_DOWN_READING_DISTANCE } from "../utils/top-down-mode";
 
@@ -61,6 +62,7 @@ AFRAME.registerComponent("name-tag", {
     this.pronouns = null;
     this.identityName = null;
     this.status = "none";
+    this.isInPrivateZone = false;
     this.isTalking = false;
     this.isTyping = false;
     this.isOwner = false;
@@ -116,6 +118,17 @@ AFRAME.registerComponent("name-tag", {
     );
     this.statusIcon.visible = false;
     this.el.object3D.add(this.statusIcon);
+
+    // Ear icon, to the right of the status icon: says this person is in a
+    // private zone, which is otherwise invisible to everyone outside it — they
+    // would just seem to have gone quiet.
+    this.privateZoneIconSize = 0;
+    this.privateZoneIcon = new THREE.Mesh(
+      statusIconGeometry,
+      new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false })
+    );
+    this.privateZoneIcon.visible = false;
+    this.el.object3D.add(this.privateZoneIcon);
 
     this.nametagVolume = new THREE.Mesh(nametagVolumeGeometry, nametagVolumeMaterial);
     this.nametagVolume.position.set(0, this.nameTagVolumeY, 0.001);
@@ -173,6 +186,13 @@ AFRAME.registerComponent("name-tag", {
       }
       this.wasTalking = this.isTalking;
       this.isTalking = this.audioAnalyzer.avatarIsTalking;
+
+      // Membership changes as people walk, with no event to hang this on.
+      const inPrivateZone = isSessionInPrivateZone(this.playerSessionId);
+      if (inPrivateZone !== this.isInPrivateZone) {
+        this.isInPrivateZone = inPrivateZone;
+        this.onPrivateZoneChanged();
+      }
 
       if (this.shouldBeVisible) {
         this.nametag.visible = true;
@@ -387,9 +407,8 @@ AFRAME.registerComponent("name-tag", {
       this.nameTagTextY = NAMETAG_TEXT_Y;
     }
 
-    // Work out the icon and the room it takes from the text before laying out.
-    this.statusIconSize = getStatusIconTexture(this.status) ? this.nameTagHeight - NAMETAG_STATUS_ICON_PADDING * 2 : 0;
-    this.textOffsetX = -this.statusIconSize / 2;
+    // Work out the icons and the room they take from the text before laying out.
+    this.applyIconLayout();
 
     this.updateAvatarModelAABB();
     const tmpVector = new THREE.Vector3();
@@ -431,8 +450,36 @@ AFRAME.registerComponent("name-tag", {
     this.updateTheme();
   },
 
+  // Both icons stand at the right end of the plate, filling its height, and the
+  // text is shifted left by half of what they take. Kept apart from
+  // updateElements so a private zone opening or closing does not re-run the
+  // hand-raised animation with it.
+  applyIconLayout() {
+    const iconSize = this.nameTagHeight - NAMETAG_STATUS_ICON_PADDING * 2;
+    this.statusIconSize = getStatusIconTexture(this.status) ? iconSize : 0;
+    this.privateZoneIconSize = this.isInPrivateZone ? iconSize : 0;
+    this.textOffsetX = -(this.statusIconSize + this.privateZoneIconSize) / 2;
+
+    const texture = this.privateZoneIconSize ? getPrivateZoneIconTexture() : null;
+    this.privateZoneIcon.visible = !!texture;
+    if (texture) {
+      this.privateZoneIcon.material.map = texture;
+      this.privateZoneIcon.material.needsUpdate = true;
+      this.privateZoneIcon.scale.setScalar(this.privateZoneIconSize);
+      this.privateZoneIcon.matrixNeedsUpdate = true;
+    }
+  },
+
+  // Laid out right to left: the ear sits outermost, the status icon beside it.
+  onPrivateZoneChanged() {
+    this.applyIconLayout();
+    this.updateDisplayName();
+    this.updateStatus();
+    this.resizeNameTag();
+  },
+
   resizeNameTag() {
-    const width = this.size.x + NAMETAG_BACKGROUND_PADDING * 2 + this.statusIconSize;
+    const width = this.size.x + NAMETAG_BACKGROUND_PADDING * 2 + this.statusIconSize + this.privateZoneIconSize;
     this.nametagBackground.el.setAttribute("slice9", {
       width,
       height: this.nameTagHeight
@@ -441,8 +488,14 @@ AFRAME.registerComponent("name-tag", {
       width: width + NAMETAG_STATUS_BORDER_PADDING,
       height: this.nameTagHeight + NAMETAG_STATUS_BORDER_PADDING
     });
+    let iconRight = width / 2 - NAMETAG_STATUS_ICON_PADDING;
+    if (this.privateZoneIconSize) {
+      this.privateZoneIcon.position.set(iconRight - this.privateZoneIconSize / 2, 0, 0.002);
+      this.privateZoneIcon.matrixNeedsUpdate = true;
+      iconRight -= this.privateZoneIconSize;
+    }
     if (this.statusIconSize) {
-      this.statusIcon.position.set(width / 2 - this.statusIconSize / 2 - NAMETAG_STATUS_ICON_PADDING, 0, 0.002);
+      this.statusIcon.position.set(iconRight - this.statusIconSize / 2, 0, 0.002);
       this.statusIcon.matrixNeedsUpdate = true;
     }
   },

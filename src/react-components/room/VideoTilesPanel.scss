@@ -127,10 +127,14 @@
   display: flex;
   flex: 0 0 auto;
   color: white;
+  // Fallback only: the tile measures itself and passes the real size, which
+  // grows with it — a 14px icon vanishes on a tile filling half the screen.
+  width: 14px;
+  height: 14px;
 
   svg {
-    width: 14px;
-    height: 14px;
+    width: 100%;
+    height: 100%;
   }
 }
 
@@ -140,9 +144,11 @@
   color: theme.$red;
 }
 
-// Same colour ring and glyph as the in-world name tag carries, so the tile and
-// the avatar say the same thing. No text: there is no room for any.
-:local(.status-badge) {
+// Same coloured ring and glyph as the in-world name tag carries, so the tile
+// and the avatar say the same thing. No text: there is no room for any. Used
+// for the status and for the private zone ear alike; the colour comes from the
+// caller. Fallback size only, as above.
+:local(.glyph-badge) {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -156,6 +162,7 @@
 
 :local(.label) {
   color: white;
+  // Fallback: scaled with the tile like everything else drawn on it.
   font-size: theme.$font-size-xs;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -186,10 +193,22 @@
   white-space: nowrap;
 }
 
-// The spotlight is many times the size of a strip tile, and a 16px name in the
-// middle of it reads as a mistake.
+// Only reached before the tile has been measured; after that the size comes
+// from the tile's own width.
 :local(.fill) :local(.placeholder-name) {
   font-size: 32px;
+}
+
+// The private zone badge owns the top-left corner, which is where the 2D strip
+// starts, so the strip begins below it while the zone is on.
+:local(.column):local(.below-private-badge) {
+  top: 64px;
+  height: calc(100% - 72px);
+
+  @media (min-width: theme.$breakpoint-lg) {
+    top: 80px;
+    height: calc(100% - 104px);
+  }
 }
 
 // Doubled, and after .column on purpose: it has to outrank the display: flex of

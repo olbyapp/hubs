@@ -83,6 +83,7 @@ import { ReactionPopoverContainer } from "./room/ReactionPopoverContainer";
 import { StatusPopoverContainer } from "./room/StatusPopoverContainer";
 import { TopDownToggleButton } from "./room/TopDownToggleButton";
 import { PrivateZoneToggleButton } from "./room/PrivateZoneToggleButton";
+import { PrivateZoneIndicator } from "./room/PrivateZoneIndicator";
 import { VideoTilesPanel } from "./room/VideoTilesPanel";
 import { requestTopDownOnEntry } from "../utils/top-down-mode";
 import { SafariMicModal } from "./room/SafariMicModal";
@@ -1429,6 +1430,7 @@ class UIRoot extends Component {
                         sessionId={this.props.sessionId}
                       />
                     )}
+                    {entered && <PrivateZoneIndicator />}
                     {!this.props.selectedObject && <CompactMoreMenuButton />}
                     {(!this.props.selectedObject ||
                       (this.props.breakpoint !== "sm" && this.props.breakpoint !== "md")) && (
