@@ -29,6 +29,7 @@ import { EmojiSystem } from "./emoji-system";
 import { AudioZonesSystem } from "./audio-zones-system";
 import { GainSystem } from "./audio-gain-system";
 import { PrivateZoneSystem } from "./private-zone-system";
+import { StatusNudgeSystem } from "./status-nudge-system";
 import { DialogerSystem } from "./dialoger-system";
 import { EnvironmentSystem } from "./environment-system";
 import { DayNightSystem } from "./day-night-system";
@@ -154,6 +155,7 @@ AFRAME.registerSystem("hubs-systems", {
     this.audioZonesSystem = new AudioZonesSystem();
     this.gainSystem = new GainSystem();
     this.privateZoneSystem = new PrivateZoneSystem();
+    this.statusNudgeSystem = new StatusNudgeSystem(this.el);
     // No tick: the audio path is driven by an AudioWorklet, and everything
     // else here is event driven.
     this.dialogerSystem = new DialogerSystem();
@@ -284,6 +286,10 @@ export function mainTick(xrFrame: XRFrame, renderer: WebGLRenderer, scene: Scene
   scenePreviewCameraSystem(world, hubsSystems.cameraSystem);
   hubsSystems.inspectYourselfSystem.tick(hubsSystems.el, aframeSystems.userinput, hubsSystems.cameraSystem);
   hubsSystems.cameraSystem.tick(hubsSystems.el, dt);
+  // After the camera and the character controller have had the frame's input:
+  // it watches the same actions they consume, and reading them once they are
+  // settled keeps the two in step.
+  hubsSystems.statusNudgeSystem.tick(dt);
   cameraToolSystem(world);
   hubsSystems.waypointSystem.tick(t, dt);
   hubsSystems.menuAnimationSystem.tick(t);

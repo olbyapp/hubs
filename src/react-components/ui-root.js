@@ -81,6 +81,9 @@ import { SharePopoverContainer } from "./room/SharePopoverContainer";
 import { AudioPopoverButtonContainer } from "./room/AudioPopoverButtonContainer";
 import { ReactionPopoverContainer } from "./room/ReactionPopoverContainer";
 import { StatusPopoverContainer } from "./room/StatusPopoverContainer";
+import { StatusNudgeModal } from "./room/StatusNudgeModal";
+import { closeStatusNudge, STATUS_NUDGE_EVENT } from "../systems/status-nudge-system";
+import { setOwnStatus } from "../utils/user-status";
 import { TopDownToggleButton } from "./room/TopDownToggleButton";
 import { PrivateZoneToggleButton } from "./room/PrivateZoneToggleButton";
 import { DialogerRecButton } from "./room/DialogerRecButton";
@@ -321,6 +324,7 @@ class UIRoot extends Component {
     window.addEventListener("idle_detected", this.onIdleDetected);
     window.addEventListener("activity_detected", this.onActivityDetected);
     window.addEventListener("focus_chat", this.onFocusChat);
+    window.addEventListener(STATUS_NUDGE_EVENT, this.onQuietStatusActivity);
     document.querySelector(".a-canvas").addEventListener("mouseup", () => {
       if (this.state.showShareDialog) {
         this.setState({ showShareDialog: false });
@@ -427,6 +431,7 @@ class UIRoot extends Component {
     window.removeEventListener("idle_detected", this.onIdleDetected);
     window.removeEventListener("activity_detected", this.onActivityDetected);
     window.removeEventListener("focus_chat", this.onFocusChat);
+    window.removeEventListener(STATUS_NUDGE_EVENT, this.onQuietStatusActivity);
   }
 
   storeUpdated = () => {
@@ -685,6 +690,33 @@ class UIRoot extends Component {
     } else {
       showFullScreenIfWasFullScreen();
     }
+  };
+
+  // Someone marked Thinking or AFK started moving again — status-nudge-system
+  // has already decided the movement was deliberate. An open sidebar is no
+  // reason to hold off, the modal sits beside it; another dialog is, and
+  // standing the system down re-arms it for the next time they move.
+  onQuietStatusActivity = ({ detail }) => {
+    if (this.state.dialog) {
+      closeStatusNudge();
+      return;
+    }
+
+    this.showNonHistoriedDialog(StatusNudgeModal, {
+      status: detail.status,
+      onResume: () => {
+        // Leaving the quiet status unmutes and stands the system down.
+        setOwnStatus("none");
+        closeStatusNudge({ snooze: false });
+        this.closeDialog();
+      },
+      // Closing the modal without answering means the status was intended, so
+      // it counts as "keep it" rather than leaving the question hanging.
+      onClose: () => {
+        closeStatusNudge({ snooze: true });
+        this.closeDialog();
+      }
+    });
   };
 
   showNonHistoriedDialog = (DialogClass, props = {}) => {
