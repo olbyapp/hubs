@@ -165,7 +165,21 @@ export const SCHEMA = {
         avatarVoiceLevels: { type: "object" },
         enablePostEffects: { type: "bool", default: false },
         enableBloom: { type: "bool", default: true }, // only applies if post effects are enabled
-        aaMode: { type: "string", default: AAModes.MSAA_4X } // only applies if post effects are enabled
+        aaMode: { type: "string", default: AAModes.MSAA_4X }, // only applies if post effects are enabled
+        // Recording meetings into a local Dialoger. Off by default, and that
+        // flag is what decides whether the Rec button exists at all: only the
+        // person actually running Dialoger turns it on, so nobody else sees a
+        // control they cannot use.
+        dialogerEnabled: { type: "bool", default: false },
+        dialogerUrl: { type: "string", default: "http://127.0.0.1:8765" },
+        // Shared secret Dialoger prints at /api/office/token. Stored per
+        // browser profile; anyone with XSS on this origin could read it, which
+        // is acceptable for a tool that only ever talks to localhost.
+        dialogerToken: { type: "string", default: "" },
+        // "bridge" relays through a popup window served by Dialoger, because
+        // Reticulum's CSP forbids a direct ws://localhost from this page.
+        // "direct" only works once that CSP has been widened server-side.
+        dialogerTransport: { type: "string", default: "bridge" }
       }
     },
 

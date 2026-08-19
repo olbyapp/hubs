@@ -65,6 +65,7 @@ declare module "aframe" {
     audioZonesSystem: AudioZonesSystem;
     gainSystem: GainSystem;
     privateZoneSystem: PrivateZoneSystem;
+    dialogerSystem: DialogerSystem;
     environmentSystem: EnvironmentSystem;
     dayNightSystem: DayNightSystem;
     nameTagSystem: NameTagVisibilitySystem;

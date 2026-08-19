@@ -27,6 +27,7 @@ import { isLockedDownDemoRoom } from "../utils/hub-utils";
 import dropdownArrowUrl from "../assets/images/dropdown_arrow.png";
 import dropdownArrow2xUrl from "../assets/images/dropdown_arrow@2x.png";
 import { PermissionNotification } from "./room/PermissionNotifications";
+import { DialogerPreferenceItem } from "./room/DialogerPreferenceItem";
 
 export const CLIPPING_THRESHOLD_MIN = 0.0;
 export const CLIPPING_THRESHOLD_MAX = 0.1;
@@ -1219,6 +1220,13 @@ class PreferencesScreen extends Component {
       [
         CATEGORY_MISC,
         [
+          {
+            // Custom component: the preferences screen has no free-text item
+            // type, and this needs a URL and a token.
+            key: "dialogerIntegration",
+            prefType: PREFERENCE_LIST_ITEM_TYPE.CUSTOM_COMPONENT,
+            componentType: DialogerPreferenceItem
+          },
           {
             key: "locale",
             prefType: PREFERENCE_LIST_ITEM_TYPE.SELECT,

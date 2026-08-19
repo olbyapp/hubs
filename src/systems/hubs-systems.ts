@@ -29,6 +29,7 @@ import { EmojiSystem } from "./emoji-system";
 import { AudioZonesSystem } from "./audio-zones-system";
 import { GainSystem } from "./audio-gain-system";
 import { PrivateZoneSystem } from "./private-zone-system";
+import { DialogerSystem } from "./dialoger-system";
 import { EnvironmentSystem } from "./environment-system";
 import { DayNightSystem } from "./day-night-system";
 import { NameTagVisibilitySystem } from "./name-tag-visibility-system";
@@ -153,6 +154,9 @@ AFRAME.registerSystem("hubs-systems", {
     this.audioZonesSystem = new AudioZonesSystem();
     this.gainSystem = new GainSystem();
     this.privateZoneSystem = new PrivateZoneSystem();
+    // No tick: the audio path is driven by an AudioWorklet, and everything
+    // else here is event driven.
+    this.dialogerSystem = new DialogerSystem();
     this.environmentSystem = new EnvironmentSystem(this.el);
     this.dayNightSystem = new DayNightSystem(this.el);
     this.nameTagSystem = new NameTagVisibilitySystem(this.el);
