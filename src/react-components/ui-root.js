@@ -35,6 +35,7 @@ import { PresenceLog } from "./presence-log.js";
 import PreloadOverlay from "./preload-overlay.js";
 import RTCDebugPanel from "./debug-panel/RtcDebugPanel.js";
 import { showFullScreenIfAvailable, showFullScreenIfWasFullScreen } from "../utils/fullscreen";
+import { requestCallAlertPermission } from "../utils/call-alerts";
 import { handleExitTo2DInterstitial, exit2DInterstitialAndEnterVR, isIn2DInterstitial } from "../utils/vr-interstitial";
 import maskEmail from "../utils/mask-email";
 
@@ -644,6 +645,14 @@ class UIRoot extends Component {
   };
 
   onAudioReadyButton = async () => {
+    // Asked for here, at the top of the click handler, rather than down in
+    // enterScene: this is the last user gesture before entering, and the two
+    // awaits below spend the transient activation that Chrome looks for. A
+    // request made after them still reaches the browser, but Chrome answers it
+    // with the quiet UI — a bell in the address bar instead of a prompt — which
+    // in practice means nobody ever sees it.
+    requestCallAlertPermission();
+
     if (!this.state.enterInVR) {
       await showFullScreenIfAvailable();
     }
