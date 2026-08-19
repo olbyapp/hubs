@@ -28,6 +28,7 @@ import { anyEntityWith, shouldUseNewLoader } from "./utils/bit-utils";
 import { moveToSpawnPoint } from "./bit-systems/waypoint";
 import { spawnFromFileList, spawnFromUrl } from "./load-media-on-paste-or-drop";
 import { isLockedDownDemoRoom } from "./utils/hub-utils";
+import { requestCallAlertPermission } from "./utils/call-alerts";
 
 export default class SceneEntryManager {
   constructor(hubChannel, authChannel, history) {
@@ -132,6 +133,11 @@ export default class SceneEntryManager {
     setTimeout(() => this.store.bumpEntryCount(), 30000);
 
     this.scene.addState("entered");
+
+    // Asked for here because entering is the moment the user has just clicked
+    // their way into a room where someone can call them, so the browser prompt
+    // has some context to land in.
+    requestCallAlertPermission();
 
     APP.mediaDevicesManager.micEnabled = !muteOnEntry;
   };

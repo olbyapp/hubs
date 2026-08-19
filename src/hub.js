@@ -275,6 +275,7 @@ import { exposeBitECSDebugHelpers } from "./bitecs-debug-helpers";
 import { loadLegacyRoomObjects } from "./utils/load-legacy-room-objects";
 import { loadSavedEntityStates } from "./utils/entity-state-utils";
 import { shouldUseNewLoader } from "./utils/bit-utils";
+import { alertIncomingCall } from "./utils/call-alerts";
 
 const PHOENIX_RELIABLE_NAF = "phx-reliable";
 NAF.options.firstSyncSource = PHOENIX_RELIABLE_NAF;
@@ -1206,10 +1207,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     const senderMeta = senderState && senderState.metas[senderState.metas.length - 1];
     const senderName = (senderMeta && senderMeta.profile && senderMeta.profile.displayName) || "Someone";
     const sfx = scene.systems["hubs-systems"].soundEffectsSystem;
-    const ringNode = sfx.playSoundLooped(SOUND_SPEAKER_TONE);
+    // Started immediately rather than queued for the next frame: the tab this
+    // has to reach is usually a hidden one, and a hidden tab gets no frames.
+    const ringNode = sfx.playSoundLoopedNow(SOUND_SPEAKER_TONE);
     if (ringNode) {
       setTimeout(() => sfx.stopSoundNode(ringNode), 10000);
     }
+    alertIncomingCall(senderName);
     messageDispatch.receive({
       type: "chat",
       name: senderName,

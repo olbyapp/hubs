@@ -122,7 +122,7 @@ export class SoundEffectsSystem {
     });
   }
 
-  enqueueSound(sound, loop) {
+  createSound(sound, loop) {
     if (this.isDisabled) return null;
     const audioBuffer = this.sounds.get(sound);
     if (!audioBuffer) return null;
@@ -132,7 +132,14 @@ export class SoundEffectsSystem {
     source.buffer = audioBuffer;
     this.scene.systems["hubs-systems"].audioSystem.addAudio({ sourceType: SourceType.SFX, node: source });
     source.loop = loop;
-    this.pendingAudioSourceNodes.push(source);
+    return source;
+  }
+
+  enqueueSound(sound, loop) {
+    const source = this.createSound(sound, loop);
+    if (source) {
+      this.pendingAudioSourceNodes.push(source);
+    }
     return source;
   }
 
@@ -182,6 +189,20 @@ export class SoundEffectsSystem {
 
   playSoundLooped(sound) {
     return this.enqueueSound(sound, true);
+  }
+
+  // Starts the sound now instead of on the next tick. The queue exists so a
+  // sound lines up with the frame that asked for it, but tick() runs off
+  // requestAnimationFrame, which the browser stops for hidden tabs — a queued
+  // sound would sit there unplayed for exactly as long as the tab stays in the
+  // background, which is when it is needed most. Anything that has to be heard
+  // while the user is looking somewhere else goes through here.
+  playSoundLoopedNow(sound) {
+    const source = this.createSound(sound, true);
+    if (source) {
+      source.start();
+    }
+    return source;
   }
 
   playSoundLoopedWithGain(sound) {
