@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Popover } from "../popover/Popover";
 import { ToolbarButton } from "../input/ToolbarButton";
 import { Button } from "../input/Button";
@@ -35,10 +35,20 @@ export function StatusPopoverContainer() {
   const title = intl.formatMessage(statusPopoverTitle);
   const [current, setCurrent] = useState(getOwnStatus());
 
-  const onSelect = useCallback(status => {
-    setOwnStatus(status);
-    setCurrent(status);
+  // The popover is not the only thing that sets a status: the modal that
+  // catches movement while away clears it, and so does switching the mic back
+  // on. Read it off the store rather than remembering what was last picked
+  // here, or the button goes on advertising a status the user has left.
+  useEffect(() => {
+    const store = window.APP.store;
+    const onProfileChanged = () => setCurrent(getOwnStatus());
+    store.addEventListener("profilechanged", onProfileChanged);
+    // Anything that landed between the first render and this effect.
+    onProfileChanged();
+    return () => store.removeEventListener("profilechanged", onProfileChanged);
   }, []);
+
+  const onSelect = useCallback(status => setOwnStatus(status), []);
 
   return (
     <Popover
