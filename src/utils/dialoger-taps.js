@@ -33,8 +33,28 @@ export class DialogerTaps {
     this._onMicShareChanged = this._onMicShareChanged.bind(this);
   }
 
+  // Probed with `in` rather than by reading the property. audioWorklet is an
+  // accessor on BaseAudioContext.prototype, so reading it off the prototype
+  // object calls the getter with `this` set to the prototype itself, which is
+  // not a live context — Chrome answers that with "Illegal invocation". This
+  // getter is read during render, so the throw came out of React and took the
+  // whole client down with it, for everyone, not just whoever had Dialoger
+  // switched on. `in` walks the chain and never invokes the accessor.
+  //
+  // Wrapped as well because a feature probe that throws must not be able to do
+  // that again: not being able to answer the question means the feature is not
+  // available, and that is all the caller wants to know.
   static get supported() {
-    return typeof AudioContext !== "undefined" && !!AudioContext.prototype.audioWorklet;
+    try {
+      return (
+        typeof AudioContext !== "undefined" &&
+        typeof AudioWorkletNode !== "undefined" &&
+        "audioWorklet" in AudioContext.prototype
+      );
+    } catch (error) {
+      console.warn("dialoger: could not probe for AudioWorklet support", error);
+      return false;
+    }
   }
 
   /**
