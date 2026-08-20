@@ -28,7 +28,11 @@ class DialogerTapProcessor extends AudioWorkletProcessor {
     this.BATCH = 4;              // 2048 samples ≈ 128 ms per message
     this.buf = new Int16Array(this.FRAME * this.BATCH);
     this.filled = 0;
-    this.muted = false;
+    // Starts muted and stays that way until something explicitly allows it.
+    // The gates are evaluated on the main thread a moment after the node is
+    // built, and starting open meant audio escaped through that gap — for a
+    // person the room had decided we should not hear.
+    this.muted = true;
     this.port.onmessage = e => {
       if (e.data && e.data.type === 'mute') this.muted = !!e.data.value;
     };

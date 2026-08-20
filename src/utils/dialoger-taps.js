@@ -33,7 +33,7 @@
 import { ensureDialogerWorklet, DIALOGER_WORKLET_NAME } from "./dialoger-worklet-source";
 import { MediaDevicesEvents } from "./media-devices-utils";
 import { getPresenceProfileForSession } from "./phoenix-utils";
-import { privateZoneSilences } from "./private-zone";
+import { getCurrentAudioSettings } from "../update-audio-settings";
 
 export const LOCAL_PEER_KEY = "__local__";
 const TARGET_SR = 16000;
@@ -67,6 +67,35 @@ function playerInfoFor(sessionId) {
     if (!info.isLocalPlayerInfo && info.playerSessionId === sessionId) return info;
   }
   return null;
+}
+
+/**
+ * How loud this person is to us right now, or null if that cannot be answered.
+ *
+ * Deliberately asks the client's own audio settings rather than enumerating
+ * the ways someone can be silenced. The first version listed them by hand —
+ * private zone, personal mute — and missed scene audio zones entirely, so a
+ * meeting held inside an isolated zone recorded the whole office along with
+ * it. Every one of those mechanisms ends up as gain on this element, so the
+ * effective gain is the honest answer to "is this person audible to me", and
+ * it keeps being the answer when someone adds a new mechanism later.
+ *
+ * Distance is not part of it: attenuation is applied further along by the gain
+ * system, and being across the room is not a privacy boundary.
+ */
+export function audibleGainFor(sessionId) {
+  const info = playerInfoFor(sessionId);
+  if (!info || !info.el) return null;
+  const audioEl = info.el.querySelector("[avatar-audio-source]");
+  if (!audioEl) return null;
+  try {
+    const settings = getCurrentAudioSettings(audioEl);
+    if (!settings || typeof settings.gain !== "number") return null;
+    return settings.gain;
+  } catch (error) {
+    console.warn("dialoger: could not read audio settings", error);
+    return null;
+  }
 }
 
 function displayNameFor(sessionId) {
@@ -248,6 +277,9 @@ export class DialogerTaps {
     node.connect(sink);
     sink.connect(ctx.destination);
     this.taps.set(key, state);
+    // Decide audibility immediately: the worklet starts muted, so this is what
+    // lets a legitimately audible person through without waiting for the tick.
+    this._applyGates();
     return state;
   }
 
@@ -394,18 +426,21 @@ export class DialogerTaps {
       if (key === LOCAL_PEER_KEY) {
         muted = !window.APP?.dialog?.isMicEnabled;
       } else {
-        const info = playerInfoFor(state.peerId);
-        // A private zone means "we stepped aside" — recording through it would
-        // break the promise the room makes. Personal mute is a weaker case,
-        // but the same answer: if the operator chose not to hear someone, the
-        // transcript should not hear them either.
-        const inPrivateZone = privateZoneSilences(info);
-        const personallyMuted = !!(info && info.el && window.APP?.mutedState?.has(info.el));
-        muted = inPrivateZone || personallyMuted;
+        const gain = audibleGainFor(state.peerId);
+        // Fail closed. An unknown answer means we cannot show this person is
+        // audible to us, and "record them anyway" is the wrong way to resolve
+        // that doubt — it is how a meeting inside an isolated zone ended up
+        // with the whole office in the transcript. The usual cause is a peer
+        // whose consumer arrived before their avatar did, which resolves by
+        // itself within a tick.
+        muted = gain === null || gain <= 0.0001;
       }
       if (muted !== state.muted) {
         state.muted = muted;
         state.node.port.postMessage({ type: "mute", value: !!muted });
+        if (state.kind === "remote") {
+          console.info("dialoger: %s is now %s", state.name, muted ? "not recorded" : "recorded");
+        }
       }
     }
   }
