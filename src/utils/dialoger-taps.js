@@ -1,9 +1,10 @@
 /**
  * Audio taps feeding a local Dialoger.
  *
- * Stage 4 taps the local microphone only; remote participants come in stage 5
- * together with the privacy gating they require (a raw consumer tap bypasses
- * private zones and per-person mute, which would silently break both).
+ * One tap per person: the operator's own microphone plus every remote
+ * participant we can hear. Each becomes its own channel, which is the whole
+ * point of the integration — Dialoger gets speech already separated by speaker
+ * and does not have to guess who said what.
  *
  * Where the local mic is tapped, and why:
  *
@@ -17,20 +18,77 @@
  *   Muting in Hubs is `_micProducer.pause()` with `disableTrackOnPause`, which
  *   only disables the *outbound destination* track. The raw track stays live
  *   and enabled, so without the explicit gate we would record through mute.
+ *
+ * Where remote participants are tapped, and what that costs:
+ *
+ *   Straight off the mediasoup consumer, which is the only place their audio
+ *   exists separately. Everything Hubs does to make people quieter — distance,
+ *   personal mute, private zones, global voice volume — is gain further down
+ *   the graph, so a tap here hears all of it regardless. That is what makes
+ *   the recording clean, and it is also why the privacy gates below are not
+ *   optional: without them someone who stepped into a private zone to talk
+ *   would still be transcribed, which would quietly break a promise the room
+ *   already makes.
  */
 import { ensureDialogerWorklet, DIALOGER_WORKLET_NAME } from "./dialoger-worklet-source";
 import { MediaDevicesEvents } from "./media-devices-utils";
+import { getPresenceProfileForSession } from "./phoenix-utils";
+import { privateZoneSilences } from "./private-zone";
 
 export const LOCAL_PEER_KEY = "__local__";
 const TARGET_SR = 16000;
+
+/**
+ * Remote audio tracks, read straight off the consumers.
+ *
+ * Never APP.dialog.getMediaStream(): that helper parks a promise which never
+ * resolves when the peer is not producing, and a second call for the same peer
+ * orphans the first — the promise avatar-audio-source is waiting on, so that
+ * person goes silent for us until the page is reloaded. Same approach as
+ * video-tiles.js.
+ */
+function remoteAudioTracks() {
+  const out = new Map();
+  const consumers = window.APP && window.APP.dialog && window.APP.dialog._consumers;
+  if (!consumers) return out;
+  consumers.forEach(consumer => {
+    const peerId = consumer.appData && consumer.appData.peerId;
+    if (!peerId || consumer.closed) return;
+    const track = consumer.track;
+    if (!track || track.readyState !== "live" || track.kind !== "audio") return;
+    out.set(peerId, track);
+  });
+  return out;
+}
+
+function playerInfoFor(sessionId) {
+  const infos = (window.APP && window.APP.componentRegistry && window.APP.componentRegistry["player-info"]) || [];
+  for (const info of infos) {
+    if (!info.isLocalPlayerInfo && info.playerSessionId === sessionId) return info;
+  }
+  return null;
+}
+
+function displayNameFor(sessionId) {
+  const presences = window.APP && window.APP.hubChannel && window.APP.hubChannel.presence?.state;
+  const profile = presences && getPresenceProfileForSession(presences, sessionId);
+  if (profile && profile.displayName) return profile.displayName;
+  const info = playerInfoFor(sessionId);
+  return (info && info.displayName) || sessionId.slice(0, 8);
+}
 
 export class DialogerTaps {
   constructor(client) {
     this.client = client;
     this.ctx = null;
-    this.local = null; // { source, node, el, channelId, sampleCursor }
+    // key -> { peerId, kind, name, track, source, node, sink, el, channelId,
+    //          sampleCursor, muted }
+    this.taps = new Map();
     this._onMicState = this._onMicState.bind(this);
     this._onMicShareChanged = this._onMicShareChanged.bind(this);
+    this._onStreamUpdated = this._onStreamUpdated.bind(this);
+    this._tick = this._tick.bind(this);
+    this._timer = null;
   }
 
   // Probed with `in` rather than by reading the property. audioWorklet is an
@@ -75,21 +133,46 @@ export class DialogerTaps {
     return this.ctx;
   }
 
-  async startLocal() {
-    if (this.local) return;
-    const track = window.APP?.mediaDevicesManager?.audioTrack;
-    if (!track) {
-      console.warn("dialoger: no microphone track to tap");
-      return;
-    }
+  /** Session-relative index of the next sample, so late joiners line up. */
+  _cursorNow() {
+    const startedAtMs = this.client.startedAtMs;
+    if (!startedAtMs) return 0;
+    return Math.max(0, Math.round(((Date.now() - startedAtMs) / 1000) * TARGET_SR));
+  }
 
+  async start() {
+    await this.startLocal();
+    const scene = window.APP && window.APP.scene;
+    if (scene) {
+      scene.addEventListener(MediaDevicesEvents.MIC_SHARE_STARTED, this._onMicShareChanged);
+      scene.addEventListener(MediaDevicesEvents.MIC_SHARE_ENDED, this._onMicShareChanged);
+    }
+    if (window.APP && window.APP.dialog) {
+      window.APP.dialog.on("mic-state-changed", this._onMicState);
+      // Consumer tracks are swapped wholesale on ICE recovery, and this is the
+      // only event that says so.
+      window.APP.dialog.on("stream_updated", this._onStreamUpdated);
+    }
+    // Backstop poll. Not decoration: removeConsumer emits nothing at all, so
+    // peers leaving would otherwise go unnoticed. It also re-evaluates the
+    // privacy gates, which depend on positions that move every frame.
+    this._timer = setInterval(this._tick, 1000);
+    this._tick();
+  }
+
+  _tick() {
+    this.syncRemote().catch(e => console.warn("dialoger: remote sync failed", e));
+    this._applyGates();
+  }
+
+  // ------------------------------------------------------------ attachment
+
+  async _attach(key, { stream, name, kind, peerId }) {
     const ctx = await this._ensureContext();
-    const stream = new MediaStream([track]);
 
     // Chrome will not pull samples out of a WebRTC-sourced track into WebAudio
-    // unless the stream is also attached to an <audio> element. The local mic
-    // is a gUM track rather than a remote one, so this is belt and braces here,
-    // but it costs nothing and stage 5 needs the same helper for real.
+    // unless the stream is also attached to an <audio> element. Mandatory for
+    // remote peers; harmless for the local gUM track.
     const el = new Audio();
     el.srcObject = stream;
     el.muted = true;
@@ -111,21 +194,28 @@ export class DialogerTaps {
     const sink = ctx.createGain();
     sink.gain.value = 0;
 
-    const name = window.APP?.store?.state?.profile?.displayName || "Me";
-    const channelId = await this.client.openChannel({
-      peerId: LOCAL_PEER_KEY,
-      name,
-      kind: "local",
-      firstSample: 0
-    });
+    const firstSample = this._cursorNow();
+    const channelId = await this.client.openChannel({ peerId, name, kind, firstSample });
     if (channelId == null) {
       source.disconnect();
       el.pause();
       el.srcObject = null;
-      return;
+      return null;
     }
 
-    const state = { source, node, sink, el, channelId, sampleCursor: 0 };
+    const state = {
+      peerId,
+      kind,
+      name,
+      track: stream.getAudioTracks()[0] || null,
+      source,
+      node,
+      sink,
+      el,
+      channelId,
+      sampleCursor: firstSample,
+      muted: null
+    };
     node.port.onmessage = ev => {
       const pcm = ev.data && ev.data.pcm;
       if (!pcm) return;
@@ -135,80 +225,168 @@ export class DialogerTaps {
     source.connect(node);
     node.connect(sink);
     sink.connect(ctx.destination);
-    this.local = state;
-
-    this._applyMuteToWorklet();
-    window.APP.dialog.on("mic-state-changed", this._onMicState);
-    // The mic track object is replaced wholesale on every device switch and on
-    // "ended", so a tap bound to the old one would go quiet without a word.
-    const scene = window.APP.scene;
-    if (scene) {
-      scene.addEventListener(MediaDevicesEvents.MIC_SHARE_STARTED, this._onMicShareChanged);
-      scene.addEventListener(MediaDevicesEvents.MIC_SHARE_ENDED, this._onMicShareChanged);
-    }
+    this.taps.set(key, state);
+    return state;
   }
 
-  _applyMuteToWorklet() {
-    if (!this.local) return;
-    const enabled = window.APP?.dialog?.isMicEnabled;
-    this.local.node.port.postMessage({ type: "mute", value: !enabled });
-  }
-
-  _onMicState() {
-    this._applyMuteToWorklet();
-  }
-
-  async _onMicShareChanged() {
-    if (!this.local) return;
-    // Reattach to the new track, keeping the channel and the sample cursor:
-    // the session timeline must not restart just because a device changed.
-    const track = window.APP?.mediaDevicesManager?.audioTrack;
-    if (!track) return;
-    const ctx = await this._ensureContext();
-    const stream = new MediaStream([track]);
+  _detach(key) {
+    const state = this.taps.get(key);
+    if (!state) return;
+    this.taps.delete(key);
     try {
-      this.local.source.disconnect();
-    } catch {
-      /* already gone */
-    }
-    this.local.el.srcObject = stream;
-    this.local.el.play().catch(() => {});
-    this.local.source = ctx.createMediaStreamSource(stream);
-    this.local.source.connect(this.local.node);
-    this._applyMuteToWorklet();
-  }
-
-  stopLocal() {
-    if (!this.local) return;
-    const { source, node, sink, el } = this.local;
-    try {
-      window.APP.dialog.off("mic-state-changed", this._onMicState);
-    } catch {
-      /* adapter already torn down */
-    }
-    const scene = window.APP.scene;
-    if (scene) {
-      scene.removeEventListener(MediaDevicesEvents.MIC_SHARE_STARTED, this._onMicShareChanged);
-      scene.removeEventListener(MediaDevicesEvents.MIC_SHARE_ENDED, this._onMicShareChanged);
-    }
-    try {
-      source.disconnect();
-      node.port.onmessage = null;
-      node.disconnect();
-      sink.disconnect();
+      state.source.disconnect();
+      state.node.port.onmessage = null;
+      state.node.disconnect();
+      state.sink.disconnect();
     } catch {
       /* nodes may already be detached */
     }
     // The stock code leaks these elements forever (see the TODO in
     // avatar-audio-source.js); do not copy that.
-    el.pause();
-    el.srcObject = null;
-    this.client.closeChannel(LOCAL_PEER_KEY);
-    this.local = null;
+    state.el.pause();
+    state.el.srcObject = null;
+    this.client.closeChannel(state.peerId);
   }
 
+  /** Swap the stream under an existing tap, keeping its channel and cursor. */
+  async _reattachStream(state, stream) {
+    const ctx = await this._ensureContext();
+    try {
+      state.source.disconnect();
+    } catch {
+      /* already gone */
+    }
+    state.el.srcObject = stream;
+    state.el.play().catch(() => {});
+    state.source = ctx.createMediaStreamSource(stream);
+    state.source.connect(state.node);
+    state.track = stream.getAudioTracks()[0] || null;
+  }
+
+  // ----------------------------------------------------------------- local
+
+  async startLocal() {
+    if (this.taps.has(LOCAL_PEER_KEY)) return;
+    const track = window.APP?.mediaDevicesManager?.audioTrack;
+    if (!track) {
+      console.warn("dialoger: no microphone track to tap");
+      return;
+    }
+    const name = window.APP?.store?.state?.profile?.displayName || "Me";
+    await this._attach(LOCAL_PEER_KEY, {
+      stream: new MediaStream([track]),
+      name,
+      kind: "local",
+      peerId: LOCAL_PEER_KEY
+    });
+    this._applyGates();
+  }
+
+  _onMicState() {
+    this._applyGates();
+  }
+
+  async _onMicShareChanged() {
+    const state = this.taps.get(LOCAL_PEER_KEY);
+    // The mic track object is replaced wholesale on every device switch and on
+    // "ended", so a tap bound to the old one would go quiet without a word.
+    const track = window.APP?.mediaDevicesManager?.audioTrack;
+    if (!state || !track) return;
+    await this._reattachStream(state, new MediaStream([track]));
+    this._applyGates();
+  }
+
+  // ---------------------------------------------------------------- remote
+
+  _onStreamUpdated(peerId, kind) {
+    if (kind && kind !== "audio") return;
+    this.syncRemote().catch(e => console.warn("dialoger: reattach failed", e));
+  }
+
+  async syncRemote() {
+    if (!this.client || !this.client.recording) return;
+    const tracks = remoteAudioTracks();
+
+    for (const [peerId, track] of tracks) {
+      const existing = this.taps.get(peerId);
+      if (!existing) {
+        await this._attach(peerId, {
+          stream: new MediaStream([track]),
+          name: displayNameFor(peerId),
+          kind: "remote",
+          peerId
+        });
+        continue;
+      }
+      if (existing.track !== track) {
+        await this._reattachStream(existing, new MediaStream([track]));
+      }
+      // Renaming in Hubs rewrites history on Dialoger's side, so the
+      // transcript ends up consistently under the new name.
+      const name = displayNameFor(peerId);
+      if (name && name !== existing.name) {
+        existing.name = name;
+        this.client.renameChannel(peerId, name);
+      }
+    }
+
+    for (const key of Array.from(this.taps.keys())) {
+      if (key === LOCAL_PEER_KEY) continue;
+      if (!tracks.has(key)) this._detach(key);
+    }
+  }
+
+  // ------------------------------------------------------------------ gates
+
+  /**
+   * Decide, per tap, whether frames should carry audio or silence.
+   *
+   * Silence rather than nothing at all: the sample counter keeps running, so
+   * the recording stays aligned with the session timeline and a gated stretch
+   * shows up as a gap in the right place instead of shifting everything after
+   * it.
+   */
+  _applyGates() {
+    for (const [key, state] of this.taps) {
+      let muted;
+      if (key === LOCAL_PEER_KEY) {
+        muted = !window.APP?.dialog?.isMicEnabled;
+      } else {
+        const info = playerInfoFor(state.peerId);
+        // A private zone means "we stepped aside" — recording through it would
+        // break the promise the room makes. Personal mute is a weaker case,
+        // but the same answer: if the operator chose not to hear someone, the
+        // transcript should not hear them either.
+        const inPrivateZone = privateZoneSilences(info);
+        const personallyMuted = !!(info && info.el && window.APP?.mutedState?.has(info.el));
+        muted = inPrivateZone || personallyMuted;
+      }
+      if (muted !== state.muted) {
+        state.muted = muted;
+        state.node.port.postMessage({ type: "mute", value: !!muted });
+      }
+    }
+  }
+
+  // -------------------------------------------------------------- teardown
+
   async stopAll() {
-    this.stopLocal();
+    if (this._timer) {
+      clearInterval(this._timer);
+      this._timer = null;
+    }
+    const scene = window.APP && window.APP.scene;
+    if (scene) {
+      scene.removeEventListener(MediaDevicesEvents.MIC_SHARE_STARTED, this._onMicShareChanged);
+      scene.removeEventListener(MediaDevicesEvents.MIC_SHARE_ENDED, this._onMicShareChanged);
+    }
+    try {
+      window.APP.dialog.off("mic-state-changed", this._onMicState);
+      window.APP.dialog.off("stream_updated", this._onStreamUpdated);
+    } catch {
+      /* adapter already torn down */
+    }
+    for (const key of Array.from(this.taps.keys())) this._detach(key);
     if (this.ctx) {
       try {
         await this.ctx.close();

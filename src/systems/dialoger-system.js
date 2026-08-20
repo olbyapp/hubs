@@ -120,7 +120,10 @@ export class DialogerSystem {
 
   _onRecordingStarted() {
     this._hb = setInterval(() => this.client.heartbeat(), HEARTBEAT_MS);
-    this.taps.startLocal().catch(e => console.warn("dialoger: failed to start local tap", e));
+    // Taps own their own reconciliation from here: the local mic, everyone
+    // audible in the room, and the privacy gates that decide which of them
+    // reach the recording.
+    this.taps.start().catch(e => console.warn("dialoger: failed to start taps", e));
     // Stock Reticulum recording flag: puts a red badge over the operator's
     // name tag for everyone in the room. That is exactly the consent signal
     // this feature needs, and it costs one call.
