@@ -51,9 +51,17 @@ function remoteAudioTracks() {
   const out = new Map();
   const consumers = window.APP && window.APP.dialog && window.APP.dialog._consumers;
   if (!consumers) return out;
+  // Presence decides who is in the room, not the consumer list. When someone
+  // leaves, the adapter calls closePeer() and that never touches _consumers —
+  // only a separate consumerClosed notification or a transport teardown does.
+  // Trusting the leftovers put four people who had already gone into a
+  // recording of a room that held one, named after the first bytes of their
+  // session id because presence had nothing left to name them with.
+  const presences = (window.APP.hubChannel && window.APP.hubChannel.presence?.state) || null;
   consumers.forEach(consumer => {
     const peerId = consumer.appData && consumer.appData.peerId;
     if (!peerId || consumer.closed) return;
+    if (presences && !presences[peerId]) return;
     const track = consumer.track;
     if (!track || track.readyState !== "live" || track.kind !== "audio") return;
     out.set(peerId, track);
