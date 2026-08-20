@@ -78,7 +78,8 @@ export function DialogerRecButton({ scene }) {
   const enabled = !!window.APP?.store?.state?.preferences?.dialogerEnabled;
 
   const onClick = useCallback(() => {
-    const system = scene.systems["hubs-systems"].dialogerSystem;
+    const system = scene.systems["hubs-systems"] && scene.systems["hubs-systems"].dialogerSystem;
+    if (!system) return;
     // Synchronous on purpose: the bridge transport opens a window, and an
     // await here would spend the user activation the popup blocker checks for.
     if (!system.client) {

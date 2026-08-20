@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { FormattedMessage } from "react-intl";
 
 /**
@@ -12,13 +12,32 @@ import { FormattedMessage } from "react-intl";
  * browser profile and never travel over presence.
  */
 export function DialogerPreferenceItem() {
-  const store = window.APP.store;
-  const prefs = store.state.preferences || {};
+  // Same lesson as the AudioWorklet probe: anything read during render must be
+  // unable to throw. This screen is reachable from the lobby too, where APP is
+  // not necessarily furnished yet, and a throw here would take the whole
+  // preferences dialog down rather than hiding one row.
+  const store = window.APP && window.APP.store;
+  // Subscribe to the store rather than reading it during render.
+  //
+  // The wrapper the preferences screen renders custom components through is
+  // memoized, and on a store change the parent hands it the very same prop
+  // references, so React skips this component entirely. Reading the value in
+  // the render body meant the checkbox drew a stale state forever: clicking it
+  // did flip the preference, but nothing on screen ever moved, and the fields
+  // it enables stayed greyed out — so it read as a control that does nothing.
+  const [prefs, setPrefs] = useState(() => (store && store.state.preferences) || {});
+  useEffect(() => {
+    if (!store) return undefined;
+    const onChanged = () => setPrefs({ ...(store.state.preferences || {}) });
+    store.addEventListener("statechanged", onChanged);
+    return () => store.removeEventListener("statechanged", onChanged);
+  }, [store]);
+
   const [url, setUrl] = useState(prefs.dialogerUrl || "http://127.0.0.1:8765");
   const [token, setToken] = useState(prefs.dialogerToken || "");
   const [checked, setChecked] = useState(null);
 
-  const save = useCallback(patch => store.update({ preferences: patch }), [store]);
+  const save = useCallback(patch => store && store.update({ preferences: patch }), [store]);
 
   const check = useCallback(async () => {
     setChecked("checking");
@@ -35,6 +54,10 @@ export function DialogerPreferenceItem() {
 
   const row = { display: "flex", gap: "8px", alignItems: "center", marginBottom: "6px" };
   const input = { flex: 1, minWidth: 0, padding: "6px 8px" };
+
+  // Nothing to configure without a store — hide the row instead of rendering
+  // controls whose every handler would be a no-op.
+  if (!store) return null;
 
   return (
     <div style={{ width: "100%", padding: "6px 0" }}>
