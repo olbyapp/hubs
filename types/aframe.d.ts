@@ -66,6 +66,7 @@ declare module "aframe" {
     gainSystem: GainSystem;
     privateZoneSystem: PrivateZoneSystem;
     statusNudgeSystem: StatusNudgeSystem;
+    speakingWhileMutedSystem: SpeakingWhileMutedSystem;
     dialogerSystem: DialogerSystem;
     environmentSystem: EnvironmentSystem;
     dayNightSystem: DayNightSystem;

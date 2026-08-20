@@ -110,6 +110,7 @@ import { MediaDevicesEvents } from "../utils/media-devices-utils";
 import { TERMS, PRIVACY } from "../constants";
 import { ECSDebugSidebarContainer } from "./debug-panel/ECSSidebar";
 import { NotificationsContainer } from "./room/NotificationsContainer";
+import { SpeakingWhileMutedNotification } from "./room/SpeakingWhileMutedNotification";
 import { usePermissions } from "./room/hooks/usePermissions";
 import { ChatContextProvider } from "./room/contexts/ChatContext";
 import ChatToolbarButton from "./room/components/ChatToolbarButton/ChatToolbarButton";
@@ -1522,6 +1523,7 @@ class UIRoot extends Component {
                       />
                     )}
                     <NotificationsContainer>
+                      {entered && <SpeakingWhileMutedNotification scene={this.props.scene} />}
                       {(this.state.hide || this.state.hideUITip || !this.props.activeObject) && (
                         <TipContainer
                           inLobby={watching}

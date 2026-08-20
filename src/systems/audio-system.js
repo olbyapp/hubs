@@ -135,6 +135,15 @@ export class AudioSystem {
     this.analyserLevels = new Uint8Array(this.outboundAnalyser.fftSize);
     this.outboundGainNode.connect(this.outboundAnalyser);
     this.outboundAnalyser.connect(this.mediaStreamDestinationNode);
+    // A tap on the microphone alone, for telling that someone is talking into a
+    // muted mic. The analyser above cannot answer that: it sits on the mixed
+    // outbound bus, which screenshare audio feeds too, and local-audio-analyser
+    // deliberately reports zero while muted. This one stays live while muted
+    // because muting pauses the outbound WebRTC track, which is downstream of
+    // this entire graph -- the mic keeps feeding Web Audio either way.
+    this.micAnalyser = this.audioContext.createAnalyser();
+    this.micAnalyser.fftSize = 32;
+    this.micAnalyserLevels = new Uint8Array(this.micAnalyser.fftSize);
     this.audioContextNeedsToBeResumed = false;
     this.mediaGainOverride = 1;
 
@@ -180,6 +189,11 @@ export class AudioSystem {
     const gainNode = this.audioContext.createGain();
     sourceNode.connect(gainNode);
     gainNode.connect(this.outboundGainNode);
+    // removeStreamFromOutboundAudio disconnects the whole gain node, so this tap
+    // goes away with the stream it belongs to and is re-made by the next mic.
+    if (id === "microphone") {
+      gainNode.connect(this.micAnalyser);
+    }
     this.audioNodes.set(id, { sourceNode, gainNode });
   }
 
