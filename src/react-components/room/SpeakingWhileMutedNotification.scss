@@ -1,0 +1,94 @@
+@use "../styles/theme.scss";
+
+// Держится, пока его не закроют или не включат микрофон, поэтому внимание оно
+// требует один раз — дрожью при появлении — а дальше просто спокойно висит.
+// Красная обводка работает всё это время: она отличает его от обычных подсказок
+// в том же углу, не заставляя ничего мигать.
+:local(.notification) {
+  pointer-events: all;
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  max-width: 100%;
+  padding: 8px 8px 8px 16px;
+  border: 2px solid theme.$red;
+  border-radius: 16px;
+  background-color: theme.$accent4-color;
+  color: white;
+  animation: speaking-while-muted-shake 0.6s ease-in-out;
+}
+
+// Три рывка примерно за полсекунды: заметно боковым зрением, но не читается
+// как поломка вёрстки. NotificationsContainer центрирует себя своим
+// translateX, так что двигать потомка безопасно.
+@keyframes speaking-while-muted-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  15%,
+  45%,
+  75% {
+    transform: translateX(-5px);
+  }
+
+  30%,
+  60%,
+  90% {
+    transform: translateX(5px);
+  }
+}
+
+:local(.message) {
+  flex: 1 1 auto;
+  margin-right: 12px;
+  font-size: theme.$font-size-md;
+  font-weight: theme.$font-weight-bold;
+  line-height: 1.25;
+  color: white;
+}
+
+// Ширина по тексту. Стоковая кнопка подсказки рассчитана на "Ok" и обрезала
+// как раз призыв к действию — то единственное, ради чего это окно показано.
+:local(.unmute-button) {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 16px;
+  background-color: white;
+  color: theme.$accent4-color;
+  font-size: theme.$font-size-md;
+  font-weight: theme.$font-weight-bold;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.85);
+  }
+
+  &:active {
+    background-color: rgba(255, 255, 255, 0.7);
+  }
+}
+
+:local(.close-button) {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: white;
+  cursor: pointer;
+
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+  }
+}

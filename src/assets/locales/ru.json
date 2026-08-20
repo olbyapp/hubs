@@ -166,6 +166,7 @@
   "scene-url-modal.change-scene-button": "Сменить сцену",
   "scene-url-modal.create-in-spoke": "Или создать новую комнату в {editorName}.",
   "scene-url-modal.new-spoke-project-button": "Открыть {editorName}",
+  "speaking-while-muted.close": "Закрыть",
   "speaking-while-muted.message": "Микрофон выключен — вас никто не слышит.",
   "speaking-while-muted.unmute": "Включить",
   "sign-in-modal.complete": "Вы вошли в систему.",
