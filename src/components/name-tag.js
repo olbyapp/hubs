@@ -9,7 +9,8 @@ import { textureLoader } from "../utils/media-utils";
 
 import handRaisedIconSrc from "../assets/hud/hand-raised.png";
 import { STATUS_LABELS, STATUS_COLORS } from "../utils/user-status";
-import { getPrivateZoneIconTexture, getStatusIconTexture } from "../utils/status-icons";
+import { getAchievementTexture, getPrivateZoneIconTexture, getStatusIconTexture } from "../utils/status-icons";
+import { achievementLine } from "../utils/achievements";
 import { isSessionInPrivateZone } from "../utils/private-zone";
 import { CAMERA_MODE_TOP_DOWN } from "../systems/camera-system";
 import { TOP_DOWN_READING_DISTANCE } from "../utils/top-down-mode";
@@ -19,16 +20,22 @@ const NAMETAG_BACKGROUND_PADDING = 0.05;
 const NAMETAG_STATUS_BORDER_PADDING = 0.035;
 const NAMETAG_MIN_WIDTH = 0.6;
 const NAMETAG_HEIGHT = 0.25;
-const NAMETAG_PRONOUN_HEIGHT = 0.325;
+const NAMETAG_TALL_HEIGHT = 0.325;
 const NAMETAG_OFFSET = 0.2;
-const NAMETAG_PRONOUN_OFFSET = 0.25;
+const NAMETAG_TALL_OFFSET = 0.25;
 const NAMETAG_VOLUME_Y = -0.075;
-const NAMETAG_VOLUME_PRONOUN_Y = -0.12;
+const NAMETAG_VOLUME_TALL_Y = -0.12;
 const NAMETAG_TEXT_Y = 0.1;
-const NAMETAG_TEXT_PRONOUN_Y = 0.125;
+const NAMETAG_TEXT_TALL_Y = 0.125;
 const TYPING_ANIM_SPEED = 150;
 const DISPLAY_NAME_LENGTH = 18;
 const NAMETAG_STATUS_ICON_PADDING = 0.025;
+// Height of the weekly award line. A shade taller than the pronouns text it
+// replaces, because an emoji at this size needs the room to stay legible.
+const ACHIEVEMENT_LINE_HEIGHT = 0.075;
+// Award and status share the second line, unless both are there — then the
+// status drops below the award.
+const NAMETAG_STATUS_BELOW_Y = -0.09;
 // Top-down: lie flat, top edge pointing north, matching the fixed camera.
 const NAMETAG_FACE_UP = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
 const NAMETAG_TOP_DOWN_CLEARANCE = 0.2;
@@ -59,7 +66,8 @@ AFRAME.registerComponent("name-tag", {
   init() {
     this.store = window.APP.store;
     this.displayName = null;
-    this.pronouns = null;
+    this.achievement = "";
+    this.achievementCount = 0;
     this.identityName = null;
     this.status = "none";
     this.isInPrivateZone = false;
@@ -100,8 +108,19 @@ AFRAME.registerComponent("name-tag", {
     this.recordingBadge = this.el.querySelector(".recordingBadge").object3D;
     this.modBadge = this.el.querySelector(".modBadge").object3D;
     this.nametagText = this.el.querySelector(".nametag-text").object3D;
-    this.pronounsText = this.el.querySelector(".pronouns-text").object3D;
     this.statusText = this.el.querySelector(".status-text").object3D;
+
+    // Weekly award line, standing where pronouns used to. Painted into a
+    // canvas rather than set as MSDF text like the lines around it: the award
+    // labels are Cyrillic and carry an emoji, and the nametag font has
+    // neither.
+    this.achievementWidth = 0;
+    this.achievementLabel = new THREE.Mesh(
+      statusIconGeometry,
+      new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false })
+    );
+    this.achievementLabel.visible = false;
+    this.el.object3D.add(this.achievementLabel);
 
     this.handRaised = new THREE.Mesh(handRaisedGeometry, handRaisedMaterial);
     this.handRaised.position.set(0, -0.3, 0.001);
@@ -283,7 +302,10 @@ AFRAME.registerComponent("name-tag", {
 
   updateFromPresenceMeta(presenceMeta) {
     this.displayName = presenceMeta.profile.displayName;
-    this.pronouns = presenceMeta.profile.pronouns;
+    // Awarded weekly by hub-stats, written into the profile by whoever won it
+    // and carried to everyone by presence, exactly the way status is.
+    this.achievement = presenceMeta.profile.achievement || "";
+    this.achievementCount = presenceMeta.profile.achievementCount || 0;
     this.identityName = presenceMeta.profile.identityName;
     // Everyone carries a status now, including those who never opened the
     // picker, so the plate always has a label and an icon.
@@ -298,12 +320,10 @@ AFRAME.registerComponent("name-tag", {
   },
 
   updateNametagWidth() {
-    this.pronounsText.el.components["text"].getSize(this.size);
-    const pronounsTextSize = this.size.x || 0;
     this.statusText.el.components["text"].getSize(this.size);
     const statusTextSize = this.size.x || 0;
     this.nametagText.el.components["text"].getSize(this.size);
-    this.size.x = Math.max(this.size.x, pronounsTextSize, statusTextSize, NAMETAG_MIN_WIDTH);
+    this.size.x = Math.max(this.size.x, this.achievementWidth, statusTextSize, NAMETAG_MIN_WIDTH);
     this.resizeNameTag();
   },
 
@@ -330,8 +350,6 @@ AFRAME.registerComponent("name-tag", {
 
     this.nametagText.position.set(this.textOffsetX, this.nameTagTextY, 0.001);
     this.nametagText.matrixNeedsUpdate = true;
-    this.pronounsText.position.set(this.textOffsetX, this.pronounsText.position.y, 0.001);
-    this.pronounsText.matrixNeedsUpdate = true;
   },
 
   updateStatus() {
@@ -346,8 +364,7 @@ AFRAME.registerComponent("name-tag", {
       });
       this.prevStatusLabel = label;
     }
-    // Shares the pronouns line unless pronouns are set, then sits below them.
-    this.statusText.position.set(this.textOffsetX, this.pronouns ? -0.09 : 0, 0.001);
+    this.statusText.position.set(this.textOffsetX, this.achievement ? NAMETAG_STATUS_BELOW_Y : 0, 0.001);
     this.statusText.matrixNeedsUpdate = true;
 
     const texture = getStatusIconTexture(this.status);
@@ -360,19 +377,25 @@ AFRAME.registerComponent("name-tag", {
     }
   },
 
-  updatePronouns() {
-    if (this.pronouns !== this.prevPronouns) {
-      this.pronounsText.el.addEventListener("text-updated", () => this.updateNametagWidth(), {
-        once: true
-      });
-      if (this.pronouns && this.pronouns.length > DISPLAY_NAME_LENGTH) {
-        this.pronouns = this.pronouns.slice(0, DISPLAY_NAME_LENGTH).concat("...");
+  updateAchievement() {
+    const line = achievementLine(this.achievement, this.achievementCount);
+    if (line !== this.prevAchievementLine) {
+      const label = getAchievementTexture(line);
+      this.achievementLabel.visible = !!label;
+      this.achievementWidth = label ? ACHIEVEMENT_LINE_HEIGHT * label.aspect : 0;
+      if (label) {
+        this.achievementLabel.material.map = label.texture;
+        this.achievementLabel.material.needsUpdate = true;
+        this.achievementLabel.scale.set(this.achievementWidth, ACHIEVEMENT_LINE_HEIGHT, 1);
       }
-      this.pronounsText.el.setAttribute("text", {
-        value: this.pronouns ? `(${this.pronouns})` : ""
-      });
-      this.prevPronouns = this.pronouns;
+      this.prevAchievementLine = line;
+      // The canvas is measured as it is drawn, so unlike the MSDF lines around
+      // it there is no text-updated event to wait for before the plate can be
+      // sized to fit.
+      this.updateNametagWidth();
     }
+    this.achievementLabel.position.set(this.textOffsetX, 0, 0.001);
+    this.achievementLabel.matrixNeedsUpdate = true;
   },
 
   onModelLoading() {
@@ -395,11 +418,11 @@ AFRAME.registerComponent("name-tag", {
   },
 
   updateElements() {
-    if (this.pronouns || (this.status && STATUS_LABELS[this.status])) {
-      this.nameTagHeight = NAMETAG_PRONOUN_HEIGHT;
-      this.nameTagOffset = NAMETAG_PRONOUN_OFFSET;
-      this.nameTagVolumeY = NAMETAG_VOLUME_PRONOUN_Y;
-      this.nameTagTextY = NAMETAG_TEXT_PRONOUN_Y;
+    if (this.achievement || (this.status && STATUS_LABELS[this.status])) {
+      this.nameTagHeight = NAMETAG_TALL_HEIGHT;
+      this.nameTagOffset = NAMETAG_TALL_OFFSET;
+      this.nameTagVolumeY = NAMETAG_VOLUME_TALL_Y;
+      this.nameTagTextY = NAMETAG_TEXT_TALL_Y;
     } else {
       this.nameTagHeight = NAMETAG_HEIGHT;
       this.nameTagOffset = NAMETAG_OFFSET;
@@ -417,19 +440,17 @@ AFRAME.registerComponent("name-tag", {
       this.avatarAABBSize.y / 2 +
       this.nameTagOffset;
     this.nametagElPosY = this.nametagHeight + (this.isHandRaised ? this.nameTagOffset : 0);
-    this.pronounsText.el && this.pronounsText.el.components["text"].getSize(this.size);
-    const pronounsTextSize = this.size.x;
     this.statusText.el && this.statusText.el.components["text"].getSize(this.size);
     const statusTextSize = this.size.x;
     this.nametagText.el.components["text"].getSize(this.size);
-    this.size.x = Math.max(this.size.x, pronounsTextSize, statusTextSize, NAMETAG_MIN_WIDTH);
+    this.size.x = Math.max(this.size.x, this.achievementWidth, statusTextSize, NAMETAG_MIN_WIDTH);
     this.nametagVolume.position.set(0, this.nameTagVolumeY, 0.001);
     this.nametagVolume.matrixNeedsUpdate = true;
     this.nametagTyping.position.set(0, this.nameTagVolumeY, 0.001);
     this.nametagTyping.matrixNeedsUpdate = true;
 
     this.updateDisplayName();
-    this.updatePronouns();
+    this.updateAchievement();
     this.updateStatus();
     this.updateHandRaised();
     this.resizeNameTag();

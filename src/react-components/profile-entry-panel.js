@@ -5,6 +5,7 @@ import { replaceHistoryState } from "../utils/history";
 import { AvatarSettingsSidebar } from "./room/AvatarSettingsSidebar";
 import { AvatarSetupModal } from "./room/AvatarSetupModal";
 import AvatarPreview from "./avatar-preview";
+import { achievementLine } from "../utils/achievements";
 
 export default class ProfileEntryPanel extends Component {
   static propTypes = {
@@ -28,8 +29,7 @@ export default class ProfileEntryPanel extends Component {
   state = {
     avatarId: null,
     displayName: null,
-    avatar: null,
-    pronouns: null
+    avatar: null
   };
 
   constructor(props) {
@@ -43,8 +43,8 @@ export default class ProfileEntryPanel extends Component {
   }
 
   getStateFromProfile = () => {
-    const { displayName, avatarId, pronouns } = this.props.store.state.profile;
-    return { displayName, avatarId, pronouns };
+    const { displayName, avatarId } = this.props.store.state.profile;
+    return { displayName, avatarId };
   };
 
   storeUpdated = () => this.setState(this.getStateFromProfile());
@@ -52,11 +52,10 @@ export default class ProfileEntryPanel extends Component {
   saveStateAndFinish = e => {
     e && e.preventDefault();
 
-    const { displayName, pronouns } = this.props.store.state.profile;
+    const { displayName } = this.props.store.state.profile;
     const { hasChangedNameOrPronouns } = this.props.store.state.activity;
 
-    const hasChangedNowOrPreviously =
-      hasChangedNameOrPronouns || this.state.displayName !== displayName || this.state.pronouns !== pronouns;
+    const hasChangedNowOrPreviously = hasChangedNameOrPronouns || this.state.displayName !== displayName;
     this.props.store.update({
       activity: {
         hasChangedNameOrPronouns: hasChangedNowOrPreviously,
@@ -64,8 +63,7 @@ export default class ProfileEntryPanel extends Component {
       },
       profile: {
         displayName: this.state.displayName,
-        avatarId: this.state.avatarId,
-        pronouns: this.state.pronouns
+        avatarId: this.state.avatarId
       }
     });
     this.props.finished();
@@ -87,7 +85,7 @@ export default class ProfileEntryPanel extends Component {
   };
 
   componentDidMount() {
-    if (this.nameInput || this.pronounsInput) {
+    if (this.nameInput) {
       // stop propagation so that avatar doesn't move when wasd'ing during text input.
       this.nameInput.addEventListener("keydown", this.stopPropagation);
       this.nameInput.addEventListener("keypress", this.stopPropagation);
@@ -108,7 +106,7 @@ export default class ProfileEntryPanel extends Component {
 
   componentWillUnmount() {
     this.props.store.removeEventListener("statechanged", this.storeUpdated);
-    if (this.nameInput || this.pronounsInput) {
+    if (this.nameInput) {
       this.nameInput.removeEventListener("keydown", this.stopPropagation);
       this.nameInput.removeEventListener("keypress", this.stopPropagation);
       this.nameInput.removeEventListener("keyup", this.stopPropagation);
@@ -126,14 +124,17 @@ export default class ProfileEntryPanel extends Component {
   render() {
     const avatarSettingsProps = {
       displayNameInputRef: inp => (this.nameInput = inp),
-      pronounsInputRef: inp => (this.pronounsInput = inp),
       disableDisplayNameInput: !!this.props.displayNameOverride,
       displayName: this.props.displayNameOverride ? this.props.displayNameOverride : this.state.displayName,
-      pronouns: this.state.pronouns,
+      // Read straight from the profile rather than from this panel's state:
+      // it is not editable here, and it changes under the panel every time the
+      // office recount lands.
+      achievement: achievementLine(
+        this.props.store.state.profile.achievement,
+        this.props.store.state.profile.achievementCount
+      ),
       displayNamePattern: this.props.store.schema.definitions.profile.properties.displayName.pattern,
-      pronounsPattern: this.props.store.schema.definitions.profile.properties.pronouns.pattern,
       onChangeDisplayName: e => this.setState({ displayName: e.target.value }),
-      onChangePronouns: e => this.setState({ pronouns: e.target.value }),
       avatarPreview: <AvatarPreview avatarGltfUrl={this.state.avatar && this.state.avatar.gltf_url} />,
       onChangeAvatar: e => {
         e.preventDefault();

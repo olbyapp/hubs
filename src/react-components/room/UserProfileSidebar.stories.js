@@ -15,7 +15,7 @@ export const AllPermissions = () => (
     sidebar={
       <UserProfileSidebar
         displayName="Robert"
-        pronouns="he/him"
+        achievement="🗣 Болтун"
         volume={4}
         isSignedIn
         canHide
@@ -33,7 +33,7 @@ export const CanDemote = () => (
     sidebar={
       <UserProfileSidebar
         displayName="Robert"
-        pronouns="he/him"
+        achievement="🗣 Болтун"
         volume={4}
         isSignedIn
         canHide
@@ -48,7 +48,7 @@ export const CanDemote = () => (
 export const CanUnhide = () => (
   <RoomLayout
     viewport={<div style={{ height: "100vh" }} />}
-    sidebar={<UserProfileSidebar displayName="Robert" pronouns="he/him" volume={4} isSignedIn canHide isHidden />}
+    sidebar={<UserProfileSidebar displayName="Robert" achievement="🗣 Болтун" volume={4} isSignedIn canHide isHidden />}
   />
 );
 
@@ -58,7 +58,7 @@ export const NotSignedIn = () => (
     sidebar={
       <UserProfileSidebar
         displayName="Robert"
-        pronouns="he/him"
+        achievement="🗣 Болтун"
         volume={4}
         isSignedIn
         canHide
@@ -73,21 +73,21 @@ export const NotSignedIn = () => (
 export const NotSignedInCanDemote = () => (
   <RoomLayout
     viewport={<div style={{ height: "100vh" }} />}
-    sidebar={<UserProfileSidebar displayName="Robert" pronouns="he/him" volume={4} canHide canKick canMute canDemote />}
+    sidebar={<UserProfileSidebar displayName="Robert" achievement="🗣 Болтун" volume={4} canHide canKick canMute canDemote />}
   />
 );
 
 export const NotSignedInCanUnhide = () => (
   <RoomLayout
     viewport={<div style={{ height: "100vh" }} />}
-    sidebar={<UserProfileSidebar displayName="Robert" pronouns="he/him" volume={4} canHide isHidden />}
+    sidebar={<UserProfileSidebar displayName="Robert" achievement="🗣 Болтун" volume={4} canHide isHidden />}
   />
 );
 
 export const NoPermissions = () => (
   <RoomLayout
     viewport={<div style={{ height: "100vh" }} />}
-    sidebar={<UserProfileSidebar displayName="Robert" pronouns="he/him" volume={4} />}
+    sidebar={<UserProfileSidebar displayName="Robert" achievement="🗣 Болтун" volume={4} />}
   />
 );
 
@@ -97,7 +97,7 @@ export const NetworkMuted = () => (
     sidebar={
       <UserProfileSidebar
         displayName="Robert"
-        pronouns="he/him"
+        achievement="🗣 Болтун"
         volume={4}
         isMuted
         isSignedIn
@@ -115,7 +115,7 @@ export const LocalMuted = () => (
     sidebar={
       <UserProfileSidebar
         displayName="Robert"
-        pronouns="he/him"
+        achievement="🗣 Болтун"
         volume={0}
         isSignedIn
         canHide
@@ -133,7 +133,7 @@ export const ShowBackButton = () => (
     sidebar={
       <UserProfileSidebar
         displayName="Robert"
-        pronouns="he/him"
+        achievement="🗣 Болтун"
         volume={4}
         showBackButton
         isSignedIn

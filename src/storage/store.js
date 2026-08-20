@@ -65,8 +65,18 @@ export const SCHEMA = {
       properties: {
         displayName: { type: "string", pattern: "^[A-Za-z0-9_~\\s\\-]{3,32}$" },
         avatarId: { type: "string" },
+        // No longer editable and no longer shown: the line under the name is
+        // the weekly award now. Kept in the schema because profiles saved
+        // before that still carry the field, and the store rejects state it
+        // has no property for.
         pronouns: { type: "string", pattern: "^([a-zA-Z]{1,32}[\\/, ]\\s*){0,4}[a-zA-Z]{1,32}$" },
         status: { type: "string", enum: ["none", "work", "eat", "thinking", "afk"] },
+        // Weekly office award (vegamix), decided by hub-stats and written back
+        // here so presence carries it to everyone exactly the way status is
+        // carried. Empty means "no award this week"; achievementCount is how
+        // many more the same person holds, shown as "+N" beside the main one.
+        achievement: { type: "string" },
+        achievementCount: { type: "number" },
         // personalAvatarId is obsolete, but we need it here for backwards compatibility.
         personalAvatarId: { type: "string" }
       }

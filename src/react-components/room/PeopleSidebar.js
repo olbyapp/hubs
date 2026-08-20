@@ -22,6 +22,7 @@ import { List, ButtonListItem } from "../layout/List";
 import { FormattedMessage, defineMessage, useIntl } from "react-intl";
 import { PermissionNotification } from "./PermissionNotifications";
 import { STATUS_DISPLAY_NAMES, STATUS_COLORS } from "../../utils/user-status";
+import { achievementLine } from "../../utils/achievements";
 
 function StatusLabel({ status }) {
   const s = status && STATUS_DISPLAY_NAMES[status] ? status : "none";
@@ -119,7 +120,11 @@ function getPersonName(person, intl) {
     id: "people-sidebar.person-name.you",
     defaultMessage: "You"
   });
-  const suffix = person.isMe ? `(${you})` : person.profile?.pronouns ? `(${person.profile.pronouns})` : "";
+  // The weekly award sits where pronouns used to, for everyone but you —
+  // your own row already says "(you)", which is the more useful label there.
+  const suffix = person.isMe
+    ? `(${you})`
+    : achievementLine(person.profile?.achievement, person.profile?.achievementCount);
 
   return `${person.profile.displayName} ${suffix}`;
 }

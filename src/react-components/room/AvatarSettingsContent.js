@@ -8,15 +8,12 @@ import { FormattedMessage } from "react-intl";
 
 export function AvatarSettingsContent({
   displayName,
-  pronouns,
+  achievement,
   displayNameInputRef,
-  pronounsInputRef,
   disableDisplayNameInput,
   onChangeDisplayName,
-  onChangePronouns,
   avatarPreview,
   displayNamePattern,
-  pronounsPattern,
   onChangeAvatar,
   ...rest
 }) {
@@ -39,14 +36,19 @@ export function AvatarSettingsContent({
         }
         ref={displayNameInputRef}
       />
+      {/* Where pronouns used to be typed in. The line under the name is now
+          the weekly office award, which nobody sets by hand — showing it here
+          read-only is what tells people why the field they remember is gone. */}
       <TextInputField
-        label={<FormattedMessage id="avatar-settings-content.pronouns-label" defaultMessage="Pronouns (optional)" />}
-        value={pronouns}
-        pattern={pronounsPattern}
-        placeholder="slash, comma or space separated"
-        spellCheck="false"
-        onChange={onChangePronouns}
-        ref={pronounsInputRef}
+        disabled
+        label={
+          <FormattedMessage
+            id="avatar-settings-content.achievement-label"
+            defaultMessage="Achievement of the week (awarded automatically)"
+          />
+        }
+        value={achievement || "—"}
+        onChange={() => {}}
       />
       <div className={styles.avatarPreviewContainer}>
         {avatarPreview || <div />}
@@ -62,14 +64,11 @@ export function AvatarSettingsContent({
 AvatarSettingsContent.propTypes = {
   className: PropTypes.string,
   displayName: PropTypes.string,
-  pronouns: PropTypes.string,
+  achievement: PropTypes.string,
   displayNameInputRef: PropTypes.func,
-  pronounsInputRef: PropTypes.func,
   disableDisplayNameInput: PropTypes.bool,
   displayNamePattern: PropTypes.string,
-  pronounsPattern: PropTypes.string,
   onChangeDisplayName: PropTypes.func,
-  onChangePronouns: PropTypes.func,
   avatarPreview: PropTypes.node,
   onChangeAvatar: PropTypes.func
 };

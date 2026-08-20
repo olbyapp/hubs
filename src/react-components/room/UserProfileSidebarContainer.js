@@ -3,6 +3,7 @@ import PropTypes from "prop-types";
 import { PromoteClientModal } from "./PromoteClientModal";
 import { getAvatarThumbnailUrl } from "../../utils/avatar-utils";
 import { UserProfileSidebar } from "./UserProfileSidebar.js";
+import { achievementLine } from "../../utils/achievements";
 import { SignInMessages } from "../auth/SignInModal";
 
 export function UserProfileSidebarContainer({
@@ -19,7 +20,7 @@ export function UserProfileSidebarContainer({
 
   const {
     id: userId,
-    profile: { displayName, identityName, avatarId, pronouns },
+    profile: { displayName, identityName, avatarId, achievement, achievementCount },
     roles
   } = user;
   const mayKick = hubChannel.canOrWillIfCreator("kick_users");
@@ -103,7 +104,7 @@ export function UserProfileSidebarContainer({
     <UserProfileSidebar
       userId={user.id}
       displayName={displayName}
-      pronouns={pronouns}
+      achievement={achievementLine(achievement, achievementCount)}
       identityName={identityName}
       avatarPreview={<img src={avatarThumbnailUrl} />}
       isSignedIn={isSignedIn}

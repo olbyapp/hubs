@@ -7,6 +7,7 @@
   "avatar-page.select": "Выбрать",
   "avatar-page.selected": "Это ваш актуальный аватар",
   "avatar-preview.loading-failed": "Loading failed.{linebreak}Пожалуйста, выберите другой аватар",
+  "avatar-settings-content.achievement-label": "Ачивка недели (выдаётся автоматически)",
   "avatar-settings-content.display-name-description": "Используйте буквы, цифры и тире. Не менее трёх и не более 32-х символов",
   "button.apply": "Применить",
   "chat-sidebar.log-message.invalid-scene-url": "Этот URL не ведёт на какую-либо сцену или действующий файл .GLB",

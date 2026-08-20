@@ -29,6 +29,7 @@ import { moveToSpawnPoint } from "./bit-systems/waypoint";
 import { spawnFromFileList, spawnFromUrl } from "./load-media-on-paste-or-drop";
 import { isLockedDownDemoRoom } from "./utils/hub-utils";
 import { isCallRinging, startCallRinging } from "./utils/call-state";
+import { startOfficeStats } from "./utils/office-stats";
 
 export default class SceneEntryManager {
   constructor(hubChannel, authChannel, history) {
@@ -133,6 +134,11 @@ export default class SceneEntryManager {
     setTimeout(() => this.store.bumpEntryCount(), 30000);
 
     this.scene.addState("entered");
+
+    // Weekly office stats (vegamix): started here rather than at page load so
+    // that the lobby, the entry flow and the bot path above never count as
+    // time spent in the office.
+    startOfficeStats();
 
     APP.mediaDevicesManager.micEnabled = !muteOnEntry;
   };

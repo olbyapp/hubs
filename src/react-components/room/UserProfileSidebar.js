@@ -21,7 +21,7 @@ export function UserProfileSidebar({
   className,
   userId,
   displayName,
-  pronouns,
+  achievement,
   identityName,
   avatarPreview,
   hasMicPresence,
@@ -60,7 +60,7 @@ export function UserProfileSidebar({
     >
       <Column center padding>
         <h2 className={styles.displayName}>{identityName ? `${displayName} (${identityName})` : displayName}</h2>
-        {pronouns && <span className={styles.pronouns}>{pronouns}</span>}
+        {achievement && <span className={styles.achievement}>{achievement}</span>}
         <div className={styles.avatarPreviewContainer}>{avatarPreview || <div />}</div>
         {hasMicPresence && (
           <div className={styles.sliderContainer}>
@@ -151,7 +151,7 @@ UserProfileSidebar.propTypes = {
   className: PropTypes.string,
   userId: PropTypes.string,
   displayName: PropTypes.string,
-  pronouns: PropTypes.string,
+  achievement: PropTypes.string,
   identityName: PropTypes.string,
   avatarPreview: PropTypes.node,
   hasMicPresence: PropTypes.bool,
