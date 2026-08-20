@@ -1,5 +1,6 @@
 import { updateAudioSettings } from "../update-audio-settings";
 import { isPrivateZoneOwn, privateZoneSilences, recomputePrivateZones } from "../utils/private-zone";
+import { updatePrivateZoneBubbles } from "../utils/private-zone-bubble";
 
 // People walk, so who is inside a bubble changes without an event to subscribe
 // to. Polled rather than run every frame: the answer only changes when someone
@@ -18,6 +19,11 @@ export class PrivateZoneSystem {
   }
 
   tick(t) {
+    // Ahead of the poll gate: who is in a bubble only changes when someone
+    // crosses the radius, but the dome that shows where that radius lies has to
+    // follow its owner every frame or it reads as the wrong boundary.
+    updatePrivateZoneBubbles();
+
     if (t - this.lastEvaluatedAt < EVALUATE_INTERVAL_MS) return;
     this.lastEvaluatedAt = t;
 
