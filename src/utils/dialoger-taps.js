@@ -89,6 +89,16 @@ export class DialogerTaps {
     this._onStreamUpdated = this._onStreamUpdated.bind(this);
     this._tick = this._tick.bind(this);
     this._timer = null;
+    // Attaching is asynchronous — a context, a worklet, a round trip to open
+    // the channel — and syncRemote runs both on a timer and on stream events.
+    // Without claiming the key up front, two overlapping passes each see "no
+    // tap for this peer" and open a second channel for them: the same person
+    // arrives twice, the second copy suffixed "(2)" by the name collision
+    // rule. Hence a synchronous reservation, plus a guard so two passes never
+    // interleave in the first place.
+    this._attaching = new Set();
+    this._syncing = false;
+    this._syncAgain = false;
   }
 
   // Probed with `in` rather than by reading the property. audioWorklet is an
@@ -168,6 +178,18 @@ export class DialogerTaps {
   // ------------------------------------------------------------ attachment
 
   async _attach(key, { stream, name, kind, peerId }) {
+    // Claimed before the first await, released only once the tap is in the
+    // map — that window is exactly where the duplicates came from.
+    if (this.taps.has(key) || this._attaching.has(key)) return null;
+    this._attaching.add(key);
+    try {
+      return await this._attachInner(key, { stream, name, kind, peerId });
+    } finally {
+      this._attaching.delete(key);
+    }
+  }
+
+  async _attachInner(key, { stream, name, kind, peerId }) {
     const ctx = await this._ensureContext();
 
     // Chrome will not pull samples out of a WebRTC-sourced track into WebAudio
@@ -305,6 +327,26 @@ export class DialogerTaps {
 
   async syncRemote() {
     if (!this.client || !this.client.recording) return;
+    // One pass at a time. A second pass starting mid-flight would race the
+    // first over the same peers; remember that another is wanted and run it
+    // after, so nothing that arrived meanwhile is missed either.
+    if (this._syncing) {
+      this._syncAgain = true;
+      return;
+    }
+    this._syncing = true;
+    try {
+      await this._syncRemoteOnce();
+    } finally {
+      this._syncing = false;
+    }
+    if (this._syncAgain) {
+      this._syncAgain = false;
+      await this.syncRemote();
+    }
+  }
+
+  async _syncRemoteOnce() {
     const tracks = remoteAudioTracks();
 
     for (const [peerId, track] of tracks) {
