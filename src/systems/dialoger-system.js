@@ -17,6 +17,7 @@ export class DialogerSystem {
     this.client = null;
     this.taps = null;
     this._hb = null;
+    this._startWhenReady = false;
     this._onClientChanged = this._onClientChanged.bind(this);
     this._onBeforeUnload = this._onBeforeUnload.bind(this);
   }
@@ -43,8 +44,14 @@ export class DialogerSystem {
    * Opens the transport. MUST be called straight from a click handler: the
    * bridge transport calls window.open, and after an await the transient user
    * activation is gone and the popup blocker takes it.
+   *
+   * `startWhenReady` makes one click enough. Connecting is asynchronous —
+   * the bridge window has to load, open its socket and get past the
+   * handshake — but nobody pressing a record button wants to learn that:
+   * they pressed Rec, so we remember the intent and act on it the moment the
+   * handshake lands.
    */
-  connect() {
+  connect({ startWhenReady = false } = {}) {
     const prefs = this._prefs();
     if (!prefs.enabled) return false;
     if (!this.client) {
@@ -53,7 +60,27 @@ export class DialogerSystem {
       this.taps = new DialogerTaps(this.client);
       window.addEventListener("beforeunload", this._onBeforeUnload);
     }
-    return this.client.connect();
+    this._startWhenReady = startWhenReady;
+    const opened = this.client.connect();
+    // Popup blocked, or no transport at all: drop the intent rather than let
+    // it fire on some later, unrelated connection.
+    if (!opened) this._startWhenReady = false;
+    return opened;
+  }
+
+  /** What the toolbar button does: connect if needed, then toggle. */
+  press() {
+    if (!this.client || this.client.state === DIALOGER_STATE.OFFLINE) {
+      this.connect({ startWhenReady: true });
+      return;
+    }
+    this.toggleRecording();
+  }
+
+  startRecording() {
+    if (!this.client) return;
+    const hubName = window.APP?.hub?.name || "Офис";
+    this.client.startSession(`${hubName} — ${new Date().toLocaleString("ru-RU")}`);
   }
 
   toggleRecording() {
@@ -61,8 +88,7 @@ export class DialogerSystem {
     if (this.client.recording) {
       this.stopRecording();
     } else {
-      const hubName = window.APP?.hub?.name || "Офис";
-      this.client.startSession(`${hubName} — ${new Date().toLocaleString("ru-RU")}`);
+      this.startRecording();
     }
   }
 
@@ -74,6 +100,13 @@ export class DialogerSystem {
     const recording = this.client.recording;
     if (recording && !this._hb) this._onRecordingStarted();
     if (!recording && this._hb) this._onRecordingStopped();
+    // The handshake finished after a click that asked for recording — honour
+    // it now. READY is the only state worth acting on: an error or a dropped
+    // connection must not silently start a session later on.
+    if (this._startWhenReady && this.client.state === DIALOGER_STATE.READY) {
+      this._startWhenReady = false;
+      this.startRecording();
+    }
     window.APP?.scene?.emit("dialoger_state_changed", { state: this.client.state });
   }
 

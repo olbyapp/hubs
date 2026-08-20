@@ -29,38 +29,47 @@ function errorText(code) {
   }
 }
 
+/**
+ * The label is always "Rec".
+ *
+ * Toolbar buttons are 48px wide with `white-space: nowrap` on the caption, so
+ * anything longer spills out of the button and lands askew over its
+ * neighbours. State belongs in the icon colour, the status dot and the
+ * tooltip, which is also how the rest of this toolbar behaves.
+ */
 function describe({ state, error, whisperLag, dropped, startedAtMs }) {
+  const base = { label: "Rec" };
   switch (state) {
     case DIALOGER_STATE.OFFLINE:
-      return { label: "Rec", tooltip: "Record this meeting to Dialoger", preset: "accent4" };
+      return { ...base, tooltip: "Record this meeting to Dialoger", preset: "accent4" };
     case DIALOGER_STATE.CONNECTING:
-      return { label: "…", tooltip: "Connecting to Dialoger", preset: "accent4", disabled: true };
+      return { ...base, tooltip: "Connecting to Dialoger…", preset: "accent4", disabled: true };
     case DIALOGER_STATE.READY:
-      return { label: "Rec", tooltip: "Start recording", preset: "accent4" };
+      return { ...base, tooltip: "Start recording", preset: "accent4" };
     case DIALOGER_STATE.STARTING:
       // Dialoger loads Whisper onto the GPU when a session starts — 5–15
-      // seconds during which nothing visible happens. Without this state the
-      // button just looks dead.
+      // seconds during which nothing visible happens.
       return {
-        label: "Starting…",
-        tooltip: "Dialoger is loading speech recognition",
+        ...base,
+        tooltip: "Starting: Dialoger is loading speech recognition…",
         preset: "accent4",
         disabled: true
       };
     case DIALOGER_STATE.RECORDING: {
       const degraded = whisperLag > 40 || dropped > 0;
       return {
-        label: `Rec${elapsed(startedAtMs)}`,
+        ...base,
         tooltip: degraded
-          ? `Recording, but Dialoger is falling behind: queue ${whisperLag}, dropped frames ${dropped}`
-          : "Recording — click to stop",
+          ? `Recording${elapsed(startedAtMs)}, but Dialoger is falling behind: queue ${whisperLag}, dropped frames ${dropped}`
+          : `Recording${elapsed(startedAtMs)} — click to stop`,
         preset: degraded ? "accent5" : "cancel",
+        selected: true,
         statusColor: "recording"
       };
     }
     case DIALOGER_STATE.ERROR:
     default:
-      return { label: "Rec", tooltip: `Dialoger: ${errorText(error)}`, preset: "accent5" };
+      return { ...base, tooltip: `Dialoger: ${errorText(error)}`, preset: "accent5" };
   }
 }
 
@@ -82,23 +91,21 @@ export function DialogerRecButton({ scene }) {
     if (!system) return;
     // Synchronous on purpose: the bridge transport opens a window, and an
     // await here would spend the user activation the popup blocker checks for.
-    if (!system.client) {
-      system.connect();
-      return;
-    }
-    system.toggleRecording();
+    // One press means "record" — the system remembers that through the
+    // handshake rather than making the user press again once it lands.
+    system.press();
   }, [scene]);
 
   if (!enabled || !dialoger.available) return null;
 
-  const { label, tooltip, preset, disabled, statusColor } = describe(dialoger);
+  const { label, tooltip, preset, disabled, selected, statusColor } = describe(dialoger);
 
   return (
     <ToolTip description={tooltip}>
       <ToolbarButton
         icon={<RecordIcon />}
         preset={preset}
-        selected={dialoger.recording}
+        selected={!!selected}
         statusColor={statusColor}
         disabled={disabled}
         onClick={onClick}
