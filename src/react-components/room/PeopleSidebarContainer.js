@@ -7,6 +7,7 @@ import { UserProfileSidebarContainer } from "./UserProfileSidebarContainer";
 import { useCan } from "./hooks/useCan";
 import { useRoomPermissions } from "./hooks/useRoomPermissions";
 import { useRole } from "./hooks/useRole";
+import { isCallRinging, onCallRingingChanged } from "../../utils/call-state";
 
 export function userFromPresence(sessionId, presence, micPresences, mySessionId, voiceEnabled) {
   const meta = presence.metas[presence.metas.length - 1];
@@ -54,6 +55,11 @@ function PeopleListContainer({ hubChannel, people, onSelectPerson, onClose }) {
     if (scene) scene.emit("action_call_client", { clientId: person.id });
   }, []);
 
+  // The handler refuses a second call while one is ringing; the buttons grey
+  // out to say so, rather than letting people press into silence.
+  const [callRinging, setCallRinging] = useState(isCallRinging);
+  useEffect(() => onCallRingingChanged(setCallRinging), []);
+
   const onMuteAll = useCallback(() => {
     for (const person of people) {
       if (person.presence === "room" && person.permissions && !person.permissions.mute_users) {
@@ -70,6 +76,7 @@ function PeopleListContainer({ hubChannel, people, onSelectPerson, onClose }) {
       people={people}
       onSelectPerson={onSelectPerson}
       onCallPerson={onCallPerson}
+      callDisabled={callRinging}
       onClose={onClose}
       onMuteAll={onMuteAll}
       showMuteAll={hubChannel.can("mute_users")}

@@ -28,6 +28,7 @@ import { anyEntityWith, shouldUseNewLoader } from "./utils/bit-utils";
 import { moveToSpawnPoint } from "./bit-systems/waypoint";
 import { spawnFromFileList, spawnFromUrl } from "./load-media-on-paste-or-drop";
 import { isLockedDownDemoRoom } from "./utils/hub-utils";
+import { isCallRinging, startCallRinging } from "./utils/call-state";
 
 export default class SceneEntryManager {
   constructor(hubChannel, authChannel, history) {
@@ -293,6 +294,18 @@ export default class SceneEntryManager {
     });
 
     this.scene.addEventListener("action_call_client", ({ detail: { clientId } }) => {
+      // Both call buttons come through here, so this is the one place that can
+      // hold the "one at a time" rule for all of them.
+      if (isCallRinging()) {
+        window.APP.messageDispatch.receive({
+          type: "chat",
+          name: "System",
+          body: "Your last call is still ringing — wait for it to finish",
+          sent: false,
+          sessionId: clientId
+        });
+        return;
+      }
       const presenceState = window.APP.hubChannel.presence.state[clientId];
       const meta = presenceState && presenceState.metas[presenceState.metas.length - 1];
       const targetName = (meta && meta.profile && meta.profile.displayName) || "user";
@@ -313,6 +326,9 @@ export default class SceneEntryManager {
       // the subscriber, so this "addressed" send reaches everyone. The callee is
       // the one who checks it.
       NAF.connection.sendDataGuaranteed(clientId, "call", { from: NAF.clientId, to: clientId });
+      // Started only once the call is really placed: a call refused for AFK
+      // never rings, so it must not lock the button either.
+      startCallRinging();
       window.APP.hubChannel.sendMessage(`📞 calling ${targetName}!`);
     });
 

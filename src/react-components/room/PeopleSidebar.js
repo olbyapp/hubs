@@ -1,5 +1,6 @@
 import React from "react";
 import PropTypes from "prop-types";
+import classNames from "classnames";
 import { ToolTip } from "@mozilla/lilypad-ui";
 import styles from "./PeopleSidebar.scss";
 import { Sidebar } from "../sidebar/Sidebar";
@@ -41,6 +42,11 @@ const toolTipDescription = defineMessage({
 const callDescription = defineMessage({
   id: "people-sidebar.call-tooltip",
   defaultMessage: "Call {name}"
+});
+
+const callRingingDescription = defineMessage({
+  id: "people-sidebar.call-ringing-tooltip",
+  defaultMessage: "Your last call is still ringing"
 });
 
 function getDeviceLabel(ctx, intl) {
@@ -122,6 +128,7 @@ export function PeopleSidebar({
   people,
   onSelectPerson,
   onCallPerson,
+  callDisabled,
   onClose,
   showMuteAll,
   onMuteAll,
@@ -216,21 +223,28 @@ export function PeopleSidebar({
                     // against the right edge, and the tooltip is anchored to the
                     // side it grows from — "bottom" grows right, off the screen.
                     location="left"
-                    description={intl.formatMessage(callDescription, { name: person.profile.displayName })}
+                    description={
+                      callDisabled
+                        ? intl.formatMessage(callRingingDescription)
+                        : intl.formatMessage(callDescription, { name: person.profile.displayName })
+                    }
                   >
                     <span
-                      className={styles.callButton}
+                      className={classNames(styles.callButton, { [styles.callButtonDisabled]: callDisabled })}
                       role="button"
-                      tabIndex={0}
+                      aria-disabled={callDisabled}
+                      tabIndex={callDisabled ? -1 : 0}
                       onClick={e => {
                         // The row opens the profile; this does not.
                         e.stopPropagation();
+                        if (callDisabled) return;
                         onCallPerson(person);
                       }}
                       onKeyDown={e => {
                         if (e.key !== "Enter" && e.key !== " ") return;
                         e.stopPropagation();
                         e.preventDefault();
+                        if (callDisabled) return;
                         onCallPerson(person);
                       }}
                     >
@@ -250,6 +264,7 @@ PeopleSidebar.propTypes = {
   people: PropTypes.array,
   onSelectPerson: PropTypes.func,
   onCallPerson: PropTypes.func,
+  callDisabled: PropTypes.bool,
   showMuteAll: PropTypes.bool,
   onMuteAll: PropTypes.func,
   onClose: PropTypes.func,

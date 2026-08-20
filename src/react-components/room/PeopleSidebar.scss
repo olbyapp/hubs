@@ -54,3 +54,18 @@
     background-color: theme.$accept-color-pressed;
   }
 }
+
+// A call rings for ten seconds with no way to cancel it, so a second one cannot
+// be placed until the first is done. Greyed rather than hidden: the button
+// disappearing mid-list would be read as the person having left.
+:local(.call-button-disabled) {
+  color: theme.$disabled-icon-color;
+  border-color: theme.$disabled-bg-color;
+  background-color: theme.$disabled-bg-color;
+  cursor: default;
+
+  &:hover {
+    color: theme.$disabled-icon-color;
+    background-color: theme.$disabled-bg-color;
+  }
+}

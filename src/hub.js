@@ -164,6 +164,7 @@ import { fetchRandomDefaultAvatarId } from "./utils/identity.js";
 
 import "./systems/nav";
 import { SOUND_SPEAKER_TONE } from "./systems/sound-effects-system";
+import { CALL_RING_MS } from "./utils/call-state";
 import "./systems/frame-scheduler";
 import "./systems/personal-space-bubble";
 import "./systems/app-mode";
@@ -1211,7 +1212,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     // has to reach is usually a hidden one, and a hidden tab gets no frames.
     const ringNode = sfx.playSoundLoopedNow(SOUND_SPEAKER_TONE);
     if (ringNode) {
-      setTimeout(() => sfx.stopSoundNode(ringNode), 10000);
+      setTimeout(() => sfx.stopSoundNode(ringNode), CALL_RING_MS);
     }
     alertIncomingCall(senderName);
     messageDispatch.receive({
