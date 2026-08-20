@@ -68,9 +68,17 @@ export class DialogerSystem {
     return opened;
   }
 
-  /** What the toolbar button does: connect if needed, then toggle. */
+  /**
+   * What the toolbar button does: connect if needed, then toggle.
+   *
+   * OFFLINE and ERROR both mean "there is nothing usable to talk through" —
+   * a closed bridge window lands in the first, a refused handshake in the
+   * second. Both have to rebuild the transport, or the button stays dead
+   * until the page is reloaded.
+   */
   press() {
-    if (!this.client || this.client.state === DIALOGER_STATE.OFFLINE) {
+    const state = this.client && this.client.state;
+    if (!this.client || state === DIALOGER_STATE.OFFLINE || state === DIALOGER_STATE.ERROR) {
       this.connect({ startWhenReady: true });
       return;
     }

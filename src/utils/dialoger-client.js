@@ -67,9 +67,29 @@ export class DialogerClient extends EventTarget {
     this.dispatchEvent(new CustomEvent("changed"));
   }
 
-  /** Must run synchronously inside a click handler (popup blocker). */
+  /**
+   * Must run synchronously inside a click handler (popup blocker).
+   *
+   * A transport that exists is not the same as one that works: closing the
+   * bridge window leaves a dead object behind, and returning early on its mere
+   * presence made the button unrecoverable — every later press posted into a
+   * closed window and failed silently, until the page was reloaded. So a spent
+   * transport gets thrown away and rebuilt.
+   */
   connect() {
-    if (this.transport) return true;
+    if (this.transport) {
+      const usable =
+        this.transport.connected ||
+        this.state === DIALOGER_STATE.CONNECTING ||
+        this.state === DIALOGER_STATE.STARTING ||
+        this.state === DIALOGER_STATE.RECORDING;
+      if (usable) return true;
+      this.transport.close();
+      this.transport = null;
+      this._helloSent = false;
+      this.sessionId = null;
+      this.channels.clear();
+    }
     this.transport = createTransport(this.transportKind, {
       baseUrl: this.baseUrl,
       onMessage: msg => this._onServerMessage(msg),
