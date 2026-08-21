@@ -1,4 +1,5 @@
 import { createImageTexture } from "../utils/media-utils";
+import { resizedImageUrlFor } from "../utils/media-url-utils";
 import { createBasisTexture, createKTX2Texture } from "../utils/create-basis-texture";
 import { TextureCache } from "../utils/texture-cache";
 import { errorTexture } from "../utils/error-texture";
@@ -103,7 +104,9 @@ AFRAME.registerComponent("media-image", {
             } else if (contentType.includes("image/ktx2")) {
               return createKTX2Texture(src);
             } else if (contentType.startsWith("image/")) {
-              return createImageTexture(src);
+              // vegamix: still images come through imgproxy at a bounded size, so a
+              // 30 MB phone photo costs a couple of hundred KB per join instead.
+              return createImageTexture(resizedImageUrlFor(src));
             }
             throw new Error(`Unknown image content type: ${contentType}`);
           };
@@ -122,6 +125,18 @@ AFRAME.registerComponent("media-image", {
                 return await loadTexture();
               } catch (e) {
                 lastError = e;
+              } finally {
+                releaseTextureSlot();
+              }
+            }
+            // vegamix: imgproxy sits in front of every still image now, so a failure
+            // there would blank the whole room. If the bounded variant never arrived,
+            // pay for the original once rather than show a broken-link card.
+            if (contentType.startsWith("image/") && resizedImageUrlFor(src) !== src) {
+              console.warn("Resized image failed to load, falling back to the original.", src, lastError);
+              await acquireTextureSlot();
+              try {
+                return await createImageTexture(src);
               } finally {
                 releaseTextureSlot();
               }

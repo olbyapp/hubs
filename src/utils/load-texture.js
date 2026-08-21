@@ -1,6 +1,7 @@
 import { TextureCache } from "../utils/texture-cache";
 import { errorTexture } from "../utils/error-texture";
 import { createImageTexture } from "../utils/media-utils";
+import { resizedImageUrlFor } from "../utils/media-url-utils";
 import { createBasisTexture, createKTX2Texture } from "../utils/create-basis-texture";
 import { createGIFTexture } from "../utils/gif-texture";
 import { withRollback } from "./coroutine-utils";
@@ -28,7 +29,16 @@ function createTexture(contentType, src) {
     return createKTX2Texture(src);
   }
   if (contentType.startsWith("image/")) {
-    return createImageTexture(src);
+    // vegamix: still images come through imgproxy at a bounded size. Keep a fallback
+    // to the original — imgproxy sits in front of every image in the room now, and a
+    // failure there must not blank the walls.
+    const resized = resizedImageUrlFor(src);
+    if (resized === src) return createImageTexture(src);
+
+    return createImageTexture(resized).catch(e => {
+      console.warn("Resized image failed to load, falling back to the original.", src, e);
+      return createImageTexture(src);
+    });
   }
 
   throw new Error(`Unknown image content type: ${contentType}`);
