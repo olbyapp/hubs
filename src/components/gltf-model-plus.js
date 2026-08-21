@@ -8,7 +8,7 @@ import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader";
 import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader";
 import HubsTextureLoader from "../loaders/HubsTextureLoader";
 import { convertStandardMaterial, mapMaterials, updateMaterials } from "../utils/material-utils";
-import { getCustomGLTFParserURLResolver } from "../utils/media-url-utils";
+import { getCustomGLTFParserURLResolver, optimizedModelUrlFor } from "../utils/media-url-utils";
 import nextTick from "../utils/next-tick";
 import { promisifyWorker } from "../utils/promisify-worker.js";
 import qsTruthy from "../utils/qs_truthy";
@@ -857,7 +857,7 @@ class GLTFHubsLoopAnimationComponent {
   }
 }
 
-export async function loadGLTF(src, contentType, onProgress, jsonPreprocessor) {
+async function loadGLTFDirect(src, contentType, onProgress, jsonPreprocessor) {
   let gltfUrl = src;
   let fileMap;
 
@@ -1017,6 +1017,31 @@ export function cloneModelFromCache(src) {
 // A socket that stalls mid-transfer leaves a THREE loader promise pending
 // forever — no rejection, so nothing retries and no error surfaces. Turning the
 // stall into a rejection lets the inflight entry be evicted and the next
+/**
+ * Loads a model, preferring a compressed variant produced by gltfproxy.
+ *
+ * vegamix: pinned models are served at whatever size they were uploaded at, and Spoke
+ * rebuilds the scene as uncompressed geometry on every publish - together that was
+ * most of the weight of joining a room. The proxy now sits in front of every model in
+ * the room, so a failure there falls back to the original rather than emptying it.
+ */
+export async function loadGLTF(src, contentType, onProgress, jsonPreprocessor) {
+  const optimizedSrc = optimizedModelUrlFor(src);
+  if (optimizedSrc === src) {
+    return loadGLTFDirect(src, contentType, onProgress, jsonPreprocessor);
+  }
+
+  try {
+    // The proxy always returns a .glb, including for Sketchfab's gltf+zip archives, so
+    // the original content type must not be passed along - it would send us down the
+    // unzip path with a binary glTF in hand.
+    return await loadGLTFDirect(optimizedSrc, "model/gltf-binary", onProgress, jsonPreprocessor);
+  } catch (e) {
+    console.warn(`Optimized model failed to load, falling back to the original: ${src}`, e);
+    return loadGLTFDirect(src, contentType, onProgress, jsonPreprocessor);
+  }
+}
+
 // request start a fresh download.
 const MODEL_LOAD_TIMEOUT_MS = 45000;
 

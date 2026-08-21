@@ -78,6 +78,44 @@ const imgproxyUrlFor = (url, width, height) => {
   }
 };
 
+// Models get the same treatment as images, for the same reason and with bigger
+// numbers: a pinned Sketchfab model is almost entirely texture, and Spoke rebuilds
+// the scene as uncompressed geometry on every publish. Sending them through a proxy
+// rather than optimising files by hand means a re-published scene is compressed
+// automatically and pinned models never have to be replaced.
+const MODEL_OPTIMIZE_PATH = "/_gltfproxy";
+
+/**
+ * Rewrites a model URL to a compressed .glb served by gltfproxy, or returns it
+ * unchanged when rewriting does not apply.
+ */
+export const optimizedModelUrlFor = url => {
+  if (typeof url !== "string") return url;
+  if (!(url.startsWith("http:") || url.startsWith("https:"))) return url;
+  if (url.includes(`${MODEL_OPTIMIZE_PATH}/`)) return url;
+
+  // Only content that was uploaded or fetched for a room. Models that ship with the
+  // app (camera tool, waypoint preview, loading object) are already optimised by the
+  // build, and routing them through the proxy would only add a hop to every join.
+  let isRoomContent = false;
+  try {
+    const parsed = new URL(url, document.location.href);
+    isRoomContent =
+      parsed.pathname.startsWith("/files/") ||
+      (!!configs.CORS_PROXY_SERVER && parsed.host === configs.CORS_PROXY_SERVER.split("/")[0]);
+  } catch {
+    return url;
+  }
+  if (!isRoomContent) return url;
+
+  try {
+    return `${MODEL_OPTIMIZE_PATH}/optimize/${imgproxyEncodeUrl(url)}.glb`;
+  } catch (e) {
+    console.warn("Could not build an optimized model URL, falling back to the original.", e);
+    return url;
+  }
+};
+
 export const resizedImageUrlFor = url => {
   const dimension = maxImageDimension();
   return imgproxyUrlFor(url, dimension, dimension) || url;
