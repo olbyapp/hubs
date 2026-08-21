@@ -129,10 +129,7 @@ export default class ProfileEntryPanel extends Component {
       // Read straight from the profile rather than from this panel's state:
       // it is not editable here, and it changes under the panel every time the
       // office recount lands.
-      achievement: achievementLine(
-        this.props.store.state.profile.achievement,
-        this.props.store.state.profile.achievementCount
-      ),
+      achievement: achievementLine(this.props.store.state.profile.achievement),
       displayNamePattern: this.props.store.schema.definitions.profile.properties.displayName.pattern,
       onChangeDisplayName: e => this.setState({ displayName: e.target.value }),
       avatarPreview: <AvatarPreview avatarGltfUrl={this.state.avatar && this.state.avatar.gltf_url} />,

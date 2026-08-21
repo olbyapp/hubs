@@ -9,6 +9,7 @@
 //   walk     — metres travelled on the floor plane, teleports excluded
 //   afk      — time in the AFK status
 //   thinking — time in the Thinking status
+//   eat      — time in the Eat status
 //
 // Why a plain interval rather than a scene system on the render tick: the
 // render loop stops in a background tab, and someone listening to a meeting
@@ -84,7 +85,7 @@ function userKey() {
   return `anon:${anon}`;
 }
 
-const pending = { talk_ms: 0, walk_mm: 0, afk_ms: 0, thinking_ms: 0 };
+const pending = { talk_ms: 0, walk_mm: 0, afk_ms: 0, thinking_ms: 0, eat_ms: 0 };
 const listeners = new Set();
 
 let started = false;
@@ -134,11 +135,13 @@ function notify() {
 // about who is in which room.
 function publishOwnAchievement() {
   const store = window.APP.store;
-  const best = myAchievements.length ? myAchievements[0] : "";
-  const extra = Math.max(0, myAchievements.length - 1);
+  // All of them, most wearable first, as one comma-separated string: name tags
+  // draw an icon per award, so the whole set has to travel, and presence
+  // carries a profile string without Reticulum needing to know what it means.
+  const worn = myAchievements.join(",");
   const profile = store.state.profile || {};
-  if (profile.achievement === best && (profile.achievementCount || 0) === extra) return;
-  store.update({ profile: { achievement: best, achievementCount: extra } });
+  if ((profile.achievement || "") === worn) return;
+  store.update({ profile: { achievement: worn, achievementCount: Math.max(0, myAchievements.length - 1) } });
 }
 
 function inTheRoom() {
@@ -202,6 +205,7 @@ function clearPending() {
   pending.walk_mm = 0;
   pending.afk_ms = 0;
   pending.thinking_ms = 0;
+  pending.eat_ms = 0;
 }
 
 async function post() {
@@ -264,6 +268,7 @@ function sample() {
   const status = getOwnStatus();
   if (status === "afk") pending.afk_ms += dt;
   if (status === "thinking") pending.thinking_ms += dt;
+  if (status === "eat") pending.eat_ms += dt;
 
   pending.walk_mm += walkedMm(dt);
 

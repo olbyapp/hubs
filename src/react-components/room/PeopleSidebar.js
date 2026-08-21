@@ -122,9 +122,7 @@ function getPersonName(person, intl) {
   });
   // The weekly award sits where pronouns used to, for everyone but you —
   // your own row already says "(you)", which is the more useful label there.
-  const suffix = person.isMe
-    ? `(${you})`
-    : achievementLine(person.profile?.achievement, person.profile?.achievementCount);
+  const suffix = person.isMe ? `(${you})` : achievementLine(person.profile?.achievement);
 
   return `${person.profile.displayName} ${suffix}`;
 }

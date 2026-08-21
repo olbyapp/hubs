@@ -9,8 +9,8 @@ import { textureLoader } from "../utils/media-utils";
 
 import handRaisedIconSrc from "../assets/hud/hand-raised.png";
 import { STATUS_LABELS, STATUS_COLORS } from "../utils/user-status";
-import { getAchievementTexture, getPrivateZoneIconTexture, getStatusIconTexture } from "../utils/status-icons";
-import { achievementLine } from "../utils/achievements";
+import { getAchievementIconsTexture, getPrivateZoneIconTexture, getStatusIconTexture } from "../utils/status-icons";
+import { achievementEmoji } from "../utils/achievements";
 import { isSessionInPrivateZone } from "../utils/private-zone";
 import { CAMERA_MODE_TOP_DOWN } from "../systems/camera-system";
 import { TOP_DOWN_READING_DISTANCE } from "../utils/top-down-mode";
@@ -20,22 +20,27 @@ const NAMETAG_BACKGROUND_PADDING = 0.05;
 const NAMETAG_STATUS_BORDER_PADDING = 0.035;
 const NAMETAG_MIN_WIDTH = 0.6;
 const NAMETAG_HEIGHT = 0.25;
-const NAMETAG_TALL_HEIGHT = 0.325;
 const NAMETAG_OFFSET = 0.2;
-const NAMETAG_TALL_OFFSET = 0.25;
 const NAMETAG_VOLUME_Y = -0.075;
-const NAMETAG_VOLUME_TALL_Y = -0.12;
 const NAMETAG_TEXT_Y = 0.1;
-const NAMETAG_TEXT_TALL_Y = 0.125;
 const TYPING_ANIM_SPEED = 150;
 const DISPLAY_NAME_LENGTH = 18;
 const NAMETAG_STATUS_ICON_PADDING = 0.025;
-// Height of the weekly award line. A shade taller than the pronouns text it
-// replaces, because an emoji at this size needs the room to stay legible.
-const ACHIEVEMENT_LINE_HEIGHT = 0.075;
-// Award and status share the second line, unless both are there — then the
-// status drops below the award.
-const NAMETAG_STATUS_BELOW_Y = -0.09;
+// Awards are drawn as icons only — no label. A name reads at a glance and a
+// row of glyphs under it does too; a Cyrillic award name at this size did not,
+// and it collided with the name above it.
+const ACHIEVEMENT_ICON_HEIGHT = 0.085;
+
+// The plate grows a line at a time. Three rows (name, awards, status) need
+// more room than the two the pronouns line ever asked for, so each layout is
+// spelled out rather than derived from a single "tall" flag.
+const NAMETAG_LAYOUTS = {
+  // rows below the name -> plate height, plate offset above the head, and the
+  // y of the name, first row and second row.
+  0: { height: NAMETAG_HEIGHT, offset: NAMETAG_OFFSET, nameY: NAMETAG_TEXT_Y, firstY: 0, secondY: 0 },
+  1: { height: 0.325, offset: 0.25, nameY: 0.125, firstY: -0.025, secondY: 0 },
+  2: { height: 0.42, offset: 0.3, nameY: 0.155, firstY: 0.005, secondY: -0.12 }
+};
 // Top-down: lie flat, top edge pointing north, matching the fixed camera.
 const NAMETAG_FACE_UP = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
 const NAMETAG_TOP_DOWN_CLEARANCE = 0.2;
@@ -110,10 +115,9 @@ AFRAME.registerComponent("name-tag", {
     this.nametagText = this.el.querySelector(".nametag-text").object3D;
     this.statusText = this.el.querySelector(".status-text").object3D;
 
-    // Weekly award line, standing where pronouns used to. Painted into a
-    // canvas rather than set as MSDF text like the lines around it: the award
-    // labels are Cyrillic and carry an emoji, and the nametag font has
-    // neither.
+    // Weekly awards, standing where pronouns used to: one canvas strip of
+    // emoji, no text. MSDF has no emoji glyphs, and the labels are Cyrillic,
+    // so this could never have been ordinary nametag text.
     this.achievementWidth = 0;
     this.achievementLabel = new THREE.Mesh(
       statusIconGeometry,
@@ -364,7 +368,7 @@ AFRAME.registerComponent("name-tag", {
       });
       this.prevStatusLabel = label;
     }
-    this.statusText.position.set(this.textOffsetX, this.achievement ? NAMETAG_STATUS_BELOW_Y : 0, 0.001);
+    this.statusText.position.set(this.textOffsetX, this.statusRowY, 0.001);
     this.statusText.matrixNeedsUpdate = true;
 
     const texture = getStatusIconTexture(this.status);
@@ -378,23 +382,24 @@ AFRAME.registerComponent("name-tag", {
   },
 
   updateAchievement() {
-    const line = achievementLine(this.achievement, this.achievementCount);
-    if (line !== this.prevAchievementLine) {
-      const label = getAchievementTexture(line);
-      this.achievementLabel.visible = !!label;
-      this.achievementWidth = label ? ACHIEVEMENT_LINE_HEIGHT * label.aspect : 0;
-      if (label) {
-        this.achievementLabel.material.map = label.texture;
+    const emoji = achievementEmoji(this.achievement);
+    const key = emoji.join("");
+    if (key !== this.prevAchievementKey) {
+      const icons = getAchievementIconsTexture(emoji);
+      this.achievementLabel.visible = !!icons;
+      this.achievementWidth = icons ? ACHIEVEMENT_ICON_HEIGHT * icons.aspect : 0;
+      if (icons) {
+        this.achievementLabel.material.map = icons.texture;
         this.achievementLabel.material.needsUpdate = true;
-        this.achievementLabel.scale.set(this.achievementWidth, ACHIEVEMENT_LINE_HEIGHT, 1);
+        this.achievementLabel.scale.set(this.achievementWidth, ACHIEVEMENT_ICON_HEIGHT, 1);
       }
-      this.prevAchievementLine = line;
+      this.prevAchievementKey = key;
       // The canvas is measured as it is drawn, so unlike the MSDF lines around
       // it there is no text-updated event to wait for before the plate can be
       // sized to fit.
       this.updateNametagWidth();
     }
-    this.achievementLabel.position.set(this.textOffsetX, 0, 0.001);
+    this.achievementLabel.position.set(this.textOffsetX, this.achievementRowY, 0.001);
     this.achievementLabel.matrixNeedsUpdate = true;
   },
 
@@ -418,17 +423,19 @@ AFRAME.registerComponent("name-tag", {
   },
 
   updateElements() {
-    if (this.achievement || (this.status && STATUS_LABELS[this.status])) {
-      this.nameTagHeight = NAMETAG_TALL_HEIGHT;
-      this.nameTagOffset = NAMETAG_TALL_OFFSET;
-      this.nameTagVolumeY = NAMETAG_VOLUME_TALL_Y;
-      this.nameTagTextY = NAMETAG_TEXT_TALL_Y;
-    } else {
-      this.nameTagHeight = NAMETAG_HEIGHT;
-      this.nameTagOffset = NAMETAG_OFFSET;
-      this.nameTagVolumeY = NAMETAG_VOLUME_Y;
-      this.nameTagTextY = NAMETAG_TEXT_Y;
-    }
+    // Awards and status each take a row of their own when both are present,
+    // which is what used to leave them sitting on top of the name.
+    const hasAwards = achievementEmoji(this.achievement).length > 0;
+    const hasStatus = !!(this.status && STATUS_LABELS[this.status]);
+    const layout = NAMETAG_LAYOUTS[(hasAwards ? 1 : 0) + (hasStatus ? 1 : 0)];
+    this.nameTagHeight = layout.height;
+    this.nameTagOffset = layout.offset;
+    this.nameTagTextY = layout.nameY;
+    // The volume bar and the typing dots ride just inside the bottom edge,
+    // wherever that edge has ended up.
+    this.nameTagVolumeY = -layout.height / 2 + 0.05;
+    this.achievementRowY = layout.firstY;
+    this.statusRowY = hasAwards ? layout.secondY : layout.firstY;
 
     // Work out the icons and the room they take from the text before laying out.
     this.applyIconLayout();
