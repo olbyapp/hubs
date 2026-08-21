@@ -216,7 +216,16 @@ export const getCustomGLTFParserURLResolver = gltfUrl => url => {
   }
 
   if (typeof url !== "string" || url === "") return "";
-  if (/^(https?:)?\/\//i.test(url)) return proxiedUrlFor(url);
+  if (/^(https?:)?\/\//i.test(url)) {
+    // vegamix: an avatar's maps are external resources of its .gltf rather than part
+    // of the file, so they never passed through the texture loaders we route. They
+    // arrive at 1-1.5 MB each and a room full of people pays for every one of them.
+    // Buffers still have to be fetched whole - imgproxy only understands images.
+    if (/\.(png|jpe?g|webp)(\?|$)/i.test(url)) {
+      return resizedImageUrlFor(proxiedUrlFor(url));
+    }
+    return proxiedUrlFor(url);
+  }
   if (/^data:.*,.*$/i.test(url)) return url;
   if (/^blob:.*$/i.test(url)) return url;
 
