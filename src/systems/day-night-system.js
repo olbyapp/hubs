@@ -3,12 +3,16 @@ import {
   Color,
   CubeCamera,
   DirectionalLight,
+  DoubleSide,
+  MeshBasicMaterial,
   Object3D,
   Quaternion,
   Scene,
   Vector3,
   WebGLCubeRenderTarget
 } from "three";
+import { forEachMaterial, updateMaterials } from "../utils/material-utils";
+import { findNode } from "../utils/three-utils";
 import { DAY_NIGHT_PANEL_ID, openDayNightPanel } from "./day-night-panel";
 
 /**
@@ -36,6 +40,8 @@ const ENVMAP_INTERVAL_MS = 180000;
 // ...и пропускаем даже её, если солнце сдвинулось меньше чем на полтора градуса.
 const ENVMAP_MIN_SUN_DELTA = Math.cos(1.5 * DEG);
 const ENVMAP_RESOLUTION = 256;
+// Небо рисуется раньше всей остальной прозрачки. Подробности — в attachSkySpheres.
+const SKY_SPHERE_RENDER_ORDER = -1000;
 
 const config = {
   // Офис в Москве. Именно эти координаты, а не часовой пояс зрителя, определяют
@@ -109,6 +115,15 @@ const config = {
 
   fogNightColor: "#0b1020",
 
+  // Имена узлов в Spoke с дневной и ночной сферой-небом. Двух текстур на одном объекте
+  // редактор не даёт, поэтому сфер две, и мы растворяем их друг в друга по фазе дня.
+  // Свет и карту окружения по-прежнему считает процедурный Skybox — сферы только картинка.
+  // null в любом из двух отключает соответствующую половину. Имя ищется без учёта регистра.
+  daySphereName: "day",
+  nightSphereName: "night",
+  // Насколько близко к краю перехода сфера считается уже полностью (не)видимой.
+  sphereFadeEpsilon: 0.002,
+
   // Пересобирать ли карту окружения вслед за солнцем.
   envMap: true,
   // Отладка: ускорение хода времени и жёстко заданный момент.
@@ -176,6 +191,32 @@ function aimAlongWorldDirection(object3D, direction) {
   object3D.matrixNeedsUpdate = true;
 }
 
+/**
+ * Материал для сферы-неба взамен авторского.
+ *
+ * Небо не должно реагировать на свет: иначе наш же цикл погасит ночную сферу второй раз,
+ * поверх её собственной ночной текстуры. По той же причине выключена тональная компрессия —
+ * экспозицию мы крутим по времени суток, и приглушать ею ночное небо незачем.
+ *
+ * DoubleSide — потому что мы не знаем, вывернута геометрия сферы наружу или внутрь, а стоит
+ * это ровно ничего: изнутри сферы в каждом направлении видна ровно одна её грань.
+ */
+function makeSkySphereMaterial(source) {
+  const material = new MeshBasicMaterial({
+    // У скайбоксных GLB текстура лежит то в map, то в emissiveMap — берём что есть.
+    map: source.map || source.emissiveMap || null,
+    side: DoubleSide,
+    fog: false,
+    transparent: true,
+    toneMapped: false,
+    // Глубину не пишем: две сферы почти одного радиуса иначе дерутся за неё. depthTest
+    // при этом остаётся включённым, поэтому небо по-прежнему прячется за стенами офиса.
+    depthWrite: false
+  });
+  if (!material.map && source.color) material.color.copy(source.color);
+  return material;
+}
+
 const sunDirection = new Vector3();
 const lightDirection = new Vector3();
 const tmpColorA = new Color();
@@ -195,6 +236,9 @@ export class DayNightSystem {
     this.baseExposure = this.renderer.toneMappingExposure;
     this.baseFogColor = null;
     this.baseSky = null;
+    this.daySphere = null;
+    this.nightSphere = null;
+    this.spheresAttached = false;
 
     this.lastUpdate = -Infinity;
     this.lastEnvMapUpdate = -Infinity;
@@ -296,6 +340,10 @@ export class DayNightSystem {
     this.lamps = [];
     this.fills = [];
     this.baseSky = null;
+    // Сцена меняется — сначала вернуть прошлым сферам авторские материалы, потом забыть их.
+    this.detachSkySpheres();
+    this.daySphere = null;
+    this.nightSphere = null;
     if (!root || !root.object3D) return;
 
     let brightest = -Infinity;
@@ -321,7 +369,42 @@ export class DayNightSystem {
       }
     });
 
+    this.daySphere = this.captureSkySphere(root.object3D, config.daySphereName);
+    this.nightSphere = this.captureSkySphere(root.object3D, config.nightSphereName);
     this.captureSky();
+  }
+
+  /**
+   * Найти сферу-небо по имени узла из Spoke и запомнить её авторское состояние.
+   *
+   * Ищем именно по имени: повесить на обычную модель свой компонент из редактора нельзя,
+   * а других надёжных признаков «это небо» у неё нет.
+   */
+  captureSkySphere(root, name) {
+    if (!name) return null;
+    const wanted = name.trim().toLowerCase();
+    const node = findNode(root, object3D => (object3D.name || "").trim().toLowerCase() === wanted);
+    if (!node) {
+      console.warn(`[day-night] узел неба "${name}" в сцене не найден — растворение выключено`);
+      return null;
+    }
+
+    const parts = [];
+    node.traverse(object3D => {
+      if (!object3D.isMesh) return;
+      parts.push({
+        mesh: object3D,
+        material: object3D.material,
+        renderOrder: object3D.renderOrder,
+        castShadow: object3D.castShadow,
+        receiveShadow: object3D.receiveShadow
+      });
+    });
+    if (!parts.length) {
+      console.warn(`[day-night] в узле неба "${name}" нет мешей — растворение выключено`);
+      return null;
+    }
+    return { node, name, parts, visible: node.visible };
   }
 
   captureSky() {
@@ -377,6 +460,7 @@ export class DayNightSystem {
     this.applyMoon(night);
     this.applyLamps(night);
     this.applyExposureAndFog(day);
+    this.applySkySpheres(day);
 
     if (config.envMap) this.maybeRegenerateEnvMap(now);
 
@@ -524,6 +608,73 @@ export class DayNightSystem {
     }
   }
 
+  applySkySpheres(day) {
+    if (!this.daySphere && !this.nightSphere) return;
+    this.attachSkySpheres();
+    // Дневная сфера — непрозрачная подложка, ночная растворяется поверх неё по той же фазе,
+    // что экспозиция и туман: пока солнце идёт от +8° к -6°, ночь проступает целиком.
+    // Отдельной длительности у перехода нет и не надо — сумерки сами по себе идут около часа.
+    const nightMix = 1 - day;
+    this.setSkySphere(this.daySphere, 1, nightMix < 1 - config.sphereFadeEpsilon);
+    this.setSkySphere(this.nightSphere, nightMix, nightMix > config.sphereFadeEpsilon);
+  }
+
+  /** Сфера рисуется на весь экран, поэтому обе включены только на самом переходе. */
+  setSkySphere(sphere, opacity, visible) {
+    if (!sphere) return;
+    sphere.node.visible = visible;
+    if (!visible) return;
+    for (let i = 0; i < sphere.parts.length; i++) {
+      forEachMaterial(sphere.parts[i].mesh, material => (material.opacity = opacity));
+    }
+  }
+
+  /**
+   * Подменить материалы сфер на собственные и развести их по порядку отрисовки.
+   *
+   * Прозрачные объекты three сортирует по расстоянию до центра меша, а центр сферы-неба —
+   * там же, где ходит камера. Без явного renderOrder небо считалось бы «самым близким» и
+   * рисовалось поверх остальной прозрачки: табличек с именами, стёкол, курсора. Отрицательный
+   * renderOrder ставит его первым среди прозрачных, а дневную сферу — под ночной, чтобы
+   * растворение шло в правильную сторону.
+   */
+  attachSkySpheres() {
+    if (this.spheresAttached) return;
+    this.spheresAttached = true;
+    this.dressSkySphere(this.daySphere, SKY_SPHERE_RENDER_ORDER);
+    this.dressSkySphere(this.nightSphere, SKY_SPHERE_RENDER_ORDER + 1);
+  }
+
+  dressSkySphere(sphere, renderOrder) {
+    if (!sphere) return;
+    for (let i = 0; i < sphere.parts.length; i++) {
+      const part = sphere.parts[i];
+      updateMaterials(part.mesh, makeSkySphereMaterial);
+      part.mesh.renderOrder = renderOrder;
+      // Небосвод не должен ни отбрасывать тени, ни принимать их, что бы ни стояло в Spoke.
+      part.mesh.castShadow = false;
+      part.mesh.receiveShadow = false;
+    }
+  }
+
+  detachSkySpheres() {
+    if (!this.spheresAttached) return;
+    this.spheresAttached = false;
+    for (const sphere of [this.daySphere, this.nightSphere]) {
+      if (!sphere) continue;
+      for (let i = 0; i < sphere.parts.length; i++) {
+        const part = sphere.parts[i];
+        // dispose материала текстуру не трогает — она общая с авторским материалом.
+        forEachMaterial(part.mesh, material => material.dispose());
+        part.mesh.material = part.material;
+        part.mesh.renderOrder = part.renderOrder;
+        part.mesh.castShadow = part.castShadow;
+        part.mesh.receiveShadow = part.receiveShadow;
+      }
+      sphere.node.visible = sphere.visible;
+    }
+  }
+
   /**
    * Пересобрать карту окружения из текущего неба.
    *
@@ -590,6 +741,7 @@ export class DayNightSystem {
     this.setOwnSunIntensity(0);
     this.renderer.toneMappingExposure = this.baseExposure;
     if (this.scene.fog && this.baseFogColor) this.scene.fog.color.copy(this.baseFogColor);
+    this.detachSkySpheres();
 
     const envSystem = this.environmentSystem;
     const sky = envSystem?.skybox;
@@ -663,6 +815,7 @@ export class DayNightSystem {
       sunMode: this.effectiveSunMode(),
       sceneLight: this.sun ? this.sun.light.name || "(без имени)" : null,
       sky: !!this.environmentSystem?.skybox,
+      skySpheres: { day: !!this.daySphere, night: !!this.nightSphere },
       lamps: this.lamps.length,
       fills: this.fills.length
     };
