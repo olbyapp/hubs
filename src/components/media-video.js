@@ -14,6 +14,7 @@ import { applyPersistentSync } from "../utils/permissions-utils";
 import { refreshMediaMirror, getCurrentMirroredMedia } from "../utils/mirror-utils";
 import { detect } from "detect-browser";
 import semver from "semver";
+import { optimizedAudioUrlFor } from "../utils/media-url-utils";
 import { createPlaneBufferGeometry } from "../utils/three-utils";
 import HubsTextureLoader from "../loaders/HubsTextureLoader";
 import { getCurrentAudioSettings, updateAudioSettings } from "../update-audio-settings";
@@ -508,8 +509,11 @@ AFRAME.registerComponent("media-video", {
   },
 
   async createVideoTextureAudioSourceEl() {
-    const url = this.data.src;
     const contentType = this.data.contentType;
+    // vegamix: a pinned track is served at whatever bitrate it was uploaded at - the
+    // one in the office room was 320 kbps stereo, 12.3 MB, and every join pulled all
+    // of it. Video is left alone; only audio goes through the transcoding proxy.
+    const url = contentType && contentType.startsWith("audio/") ? optimizedAudioUrlFor(this.data.src) : this.data.src;
     let pollTimeout;
 
     /* eslint-disable-next-line no-async-promise-executor*/
@@ -519,15 +523,25 @@ AFRAME.registerComponent("media-video", {
         this._audioSyncInterval = null;
       }
 
+      const videoEl = createVideoOrAudioEl("video");
+
       let resolved = false;
-      const failLoad = function (e) {
+      // vegamix: the transcoding proxy sits in front of pinned audio now, so a failure
+      // there must not leave a broken-media card in the room. Retry the original once.
+      let triedOriginal = url === this.data.src;
+      const originalSrc = this.data.src;
+      const failLoad = e => {
         if (resolved) return;
+        if (!triedOriginal) {
+          triedOriginal = true;
+          console.warn(`Optimized audio failed to load, falling back to the original: ${originalSrc}`, e);
+          videoEl.src = originalSrc;
+          return;
+        }
         resolved = true;
         clearTimeout(pollTimeout);
         reject(e);
       };
-
-      const videoEl = createVideoOrAudioEl("video");
 
       let texture, audioEl, isReady;
       if (contentType.startsWith("audio/")) {

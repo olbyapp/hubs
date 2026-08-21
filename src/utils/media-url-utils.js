@@ -85,28 +85,49 @@ const imgproxyUrlFor = (url, width, height) => {
 // automatically and pinned models never have to be replaced.
 const MODEL_OPTIMIZE_PATH = "/_gltfproxy";
 
+// Only content that was uploaded or fetched for a room. Assets that ship with the app
+// (camera tool, waypoint preview, loading object, UI sounds) are already optimised by
+// the build, and routing them through the proxy would only add a hop to every join.
+const isRoomContentUrl = url => {
+  if (typeof url !== "string") return false;
+  if (!(url.startsWith("http:") || url.startsWith("https:"))) return false;
+  // Never re-wrap something we already wrapped.
+  if (url.includes(`${MODEL_OPTIMIZE_PATH}/`)) return false;
+
+  try {
+    const parsed = new URL(url, document.location.href);
+    return (
+      parsed.pathname.startsWith("/files/") ||
+      (!!configs.CORS_PROXY_SERVER && parsed.host === configs.CORS_PROXY_SERVER.split("/")[0])
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Rewrites an audio URL to a lower-bitrate mono version served by gltfproxy.
+ *
+ * A pinned track is served at whatever bitrate it was uploaded at - the one in the
+ * office room was 320 kbps stereo, 12.3 MB, and every join pulled all of it through
+ * range requests. Returns the URL unchanged when rewriting does not apply.
+ */
+export const optimizedAudioUrlFor = url => {
+  if (!isRoomContentUrl(url)) return url;
+  try {
+    return `${MODEL_OPTIMIZE_PATH}/audio/${imgproxyEncodeUrl(url)}.mp3`;
+  } catch (e) {
+    console.warn("Could not build an optimized audio URL, falling back to the original.", e);
+    return url;
+  }
+};
+
 /**
  * Rewrites a model URL to a compressed .glb served by gltfproxy, or returns it
  * unchanged when rewriting does not apply.
  */
 export const optimizedModelUrlFor = url => {
-  if (typeof url !== "string") return url;
-  if (!(url.startsWith("http:") || url.startsWith("https:"))) return url;
-  if (url.includes(`${MODEL_OPTIMIZE_PATH}/`)) return url;
-
-  // Only content that was uploaded or fetched for a room. Models that ship with the
-  // app (camera tool, waypoint preview, loading object) are already optimised by the
-  // build, and routing them through the proxy would only add a hop to every join.
-  let isRoomContent = false;
-  try {
-    const parsed = new URL(url, document.location.href);
-    isRoomContent =
-      parsed.pathname.startsWith("/files/") ||
-      (!!configs.CORS_PROXY_SERVER && parsed.host === configs.CORS_PROXY_SERVER.split("/")[0]);
-  } catch {
-    return url;
-  }
-  if (!isRoomContent) return url;
+  if (!isRoomContentUrl(url)) return url;
 
   try {
     return `${MODEL_OPTIMIZE_PATH}/optimize/${imgproxyEncodeUrl(url)}.glb`;
