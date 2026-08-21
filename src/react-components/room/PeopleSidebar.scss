@@ -13,6 +13,29 @@
   }
 }
 
+// The name yields before the icons do: a long display name shrinks with an
+// ellipsis instead of shoving the awards, status and presence off the row.
+:local(.person-name) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:local(.achievements) {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  // Emoji render a shade small next to the row's text.
+  font-size: 15px;
+  line-height: 1;
+}
+
+:local(.achievement) {
+  cursor: help;
+}
+
 :local(.moderator-icon) {
   color: theme.$accent1-color;
 }

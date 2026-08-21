@@ -22,7 +22,7 @@ import { List, ButtonListItem } from "../layout/List";
 import { FormattedMessage, defineMessage, useIntl } from "react-intl";
 import { PermissionNotification } from "./PermissionNotifications";
 import { STATUS_DISPLAY_NAMES, STATUS_COLORS } from "../../utils/user-status";
-import { achievementLine } from "../../utils/achievements";
+import { ACHIEVEMENTS, achievementKeys } from "../../utils/achievements";
 
 function StatusLabel({ status }) {
   const s = status && STATUS_DISPLAY_NAMES[status] ? status : "none";
@@ -120,12 +120,37 @@ function getPersonName(person, intl) {
     id: "people-sidebar.person-name.you",
     defaultMessage: "You"
   });
-  // The weekly award sits where pronouns used to, for everyone but you —
-  // your own row already says "(you)", which is the more useful label there.
-  const suffix = person.isMe ? `(${you})` : achievementLine(person.profile?.achievement);
-
-  return `${person.profile.displayName} ${suffix}`;
+  return person.isMe ? `${person.profile.displayName} (${you})` : person.profile.displayName;
 }
+
+// Weekly awards, as icons. The label used to sit here as text and pushed the
+// status and presence off the end of the row on any name of normal length, so
+// it moved into a tooltip: a row is a glance, and the glyph is the glance.
+//
+// A native title rather than the panel's ToolTip on purpose — this list
+// scrolls, and a lilypad tooltip on a row halfway down it gets clipped by the
+// scroll container, which is the same trap the call button fell into.
+function AchievementBadges({ person }) {
+  const keys = achievementKeys(person.profile && person.profile.achievement);
+  if (!keys.length) return null;
+  return (
+    <span className={styles.achievements}>
+      {keys.map(key => (
+        <span
+          key={key}
+          className={styles.achievement}
+          title={`${ACHIEVEMENTS[key].label} — ${ACHIEVEMENTS[key].blurb}`}
+        >
+          {ACHIEVEMENTS[key].emoji}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+AchievementBadges.propTypes = {
+  person: PropTypes.object.isRequired
+};
 
 export function PeopleSidebar({
   people,
@@ -205,7 +230,8 @@ export function PeopleSidebar({
                     )}
                   </ToolTip>
                 )}
-                <p>{getPersonName(person, intl)}</p>
+                <p className={styles.personName}>{getPersonName(person, intl)}</p>
+                <AchievementBadges person={person} />
                 <StatusLabel status={person.profile && person.profile.status} />
                 {person.roles.owner && (
                   <StarIcon
