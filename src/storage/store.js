@@ -37,6 +37,19 @@ const defaultMaterialQuality = (function () {
   return "high";
 })();
 
+// A room full of pinned media can be hundreds of megabytes, and the loading screen waits
+// for every object to finish before letting anyone in (see useRoomLoadingState). On phones
+// that reads as "stuck on Loading scene" for minutes, so let mobile clients into the room
+// first and stream the media in behind them.
+const defaultLazyLoadSceneMedia = (function () {
+  const qsDefault = qsGet("default_lazy_load_scene_media");
+  if (qsDefault !== null) {
+    return qsDefault === "" || /1|on|true|yes/i.test(qsDefault);
+  }
+
+  return detectMobile() || isMobileVR();
+})();
+
 // WebAudio on Android devices (only non-VR devices?) seems to have
 // a bug and audio can be broken if there are many people in a room.
 // We have reported the problem to the Android devs. We found that
@@ -139,7 +152,7 @@ export const SCHEMA = {
         allowMultipleHubsInstances: { type: "bool", default: false },
         disableIdleDetection: { type: "bool", default: false },
         fastRoomSwitching: { type: "bool", default: false }, // No longer used. TODO How to remove this safely?
-        lazyLoadSceneMedia: { type: "bool", default: false },
+        lazyLoadSceneMedia: { type: "bool", default: defaultLazyLoadSceneMedia },
         preferMobileObjectInfoPanel: { type: "bool", default: false },
         // if unset, maxResolution = screen resolution
         maxResolutionWidth: { type: "number", default: undefined },

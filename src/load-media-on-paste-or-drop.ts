@@ -1,5 +1,6 @@
 import { createNetworkedMedia } from "./utils/create-networked-entity";
 import { upload, parseURL } from "./utils/media-utils";
+import { compressImageForUpload } from "./utils/compress-image";
 import { guessContentType } from "./utils/media-url-utils";
 import { AElement } from "aframe";
 import { Vector3 } from "three";
@@ -38,7 +39,9 @@ export function spawnFromUrl(text: string) {
 }
 
 export async function spawnFromFileList(files: FileList) {
-  for (const file of files) {
+  for (const droppedFile of files) {
+    // Downscale phone-sized photos before they ever reach storage.
+    const file = await compressImageForUpload(droppedFile);
     const desiredContentType = file.type || guessContentType(file.name);
     const params = await upload(file, desiredContentType)
       .then(function (response: UploadResponse) {

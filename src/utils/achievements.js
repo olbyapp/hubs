@@ -21,7 +21,9 @@ export const ACHIEVEMENTS = {
   ghost: { emoji: "👻", label: "Призрак", blurb: "меньше всех в офисе" },
   walker: { emoji: "🚶", label: "Форест в Попу раз", blurb: "больше всех ходит" },
   tired: { emoji: "🦥", label: "Ленивая жопа", blurb: "меньше всех ходит" },
-  invisible: { emoji: "🫥", label: "Ты его видел?", blurb: "больше всех AFK" },
+  // 🕵️ rather than the dotted-line face that reads better here: that one is
+  // Unicode 14, and Windows fonts that predate it draw an empty box.
+  invisible: { emoji: "🕵️", label: "Ты его видел?", blurb: "больше всех AFK" },
   sage: { emoji: "🧙", label: "Мудрец", blurb: "больше всех думает" },
   glutton: { emoji: "🍔", label: "Глубокая глотка", blurb: "больше всех ест" }
 };

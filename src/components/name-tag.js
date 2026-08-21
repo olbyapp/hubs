@@ -29,17 +29,22 @@ const NAMETAG_STATUS_ICON_PADDING = 0.025;
 // Awards are drawn as icons only — no label. A name reads at a glance and a
 // row of glyphs under it does too; a Cyrillic award name at this size did not,
 // and it collided with the name above it.
-const ACHIEVEMENT_ICON_HEIGHT = 0.1;
+const ACHIEVEMENT_ICON_HEIGHT = 0.115;
 
 // The plate grows a line at a time. Three rows (name, awards, status) need
 // more room than the two the pronouns line ever asked for, so each layout is
 // spelled out rather than derived from a single "tall" flag.
+//
+// The numbers were dialled in against the running client rather than derived:
+// MSDF text, an emoji canvas and a slice9 panel each carry their own idea of
+// where their vertical centre is, and the arithmetic that says these rows are
+// evenly spaced does not match what the eye sees.
 const NAMETAG_LAYOUTS = {
   // rows below the name -> plate height, plate offset above the head, and the
   // y of the name, first row and second row.
   0: { height: NAMETAG_HEIGHT, offset: NAMETAG_OFFSET, nameY: NAMETAG_TEXT_Y, firstY: 0, secondY: 0 },
-  1: { height: 0.33, offset: 0.25, nameY: 0.13, firstY: -0.035, secondY: 0 },
-  2: { height: 0.44, offset: 0.31, nameY: 0.165, firstY: 0.015, secondY: -0.115 }
+  1: { height: 0.34, offset: 0.25, nameY: 0.13, firstY: -0.035, secondY: 0 },
+  2: { height: 0.42, offset: 0.3, nameY: 0.18, firstY: -0.02, secondY: -0.12 }
 };
 // Top-down: lie flat, top edge pointing north, matching the fixed camera.
 const NAMETAG_FACE_UP = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));

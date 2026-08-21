@@ -1,5 +1,6 @@
 import { hasReticulumServer } from "./phoenix-utils";
 import configs from "./configs";
+import isMobile from "./is-mobile";
 
 const nonCorsProxyDomains = (configs.NON_CORS_PROXY_DOMAINS || "").split(",");
 if (configs.CORS_PROXY_SERVER) {
@@ -70,6 +71,48 @@ export const scaledThumbnailUrlFor = (url, width, height) => {
   }
 
   return thumbnailUrl;
+};
+
+// vegamix: media pinned in a room is served at whatever resolution it was uploaded at,
+// which for phone photos means 5000+ px and tens of megabytes on every single join.
+// Route still images through imgproxy so the client only ever fetches a bounded version.
+// Same-origin on purpose: no CORS, no extra certificate, no config plumbing.
+const IMAGE_RESIZE_PATH = "/_imgproxy";
+const MAX_IMAGE_DIMENSION_DESKTOP = 2048;
+const MAX_IMAGE_DIMENSION_MOBILE = 1024;
+// Quality is a WebP quality, not a JPEG one — 82 is visually clean at these sizes.
+const RESIZED_IMAGE_QUALITY = 82;
+
+// imgproxy takes the source URL base64url-encoded, which keeps access tokens and
+// query strings intact without any escaping games.
+const imgproxyEncodeUrl = url => b64EncodeUnicode(url).replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+
+export const maxImageDimension = () => (isMobile() ? MAX_IMAGE_DIMENSION_MOBILE : MAX_IMAGE_DIMENSION_DESKTOP);
+
+/**
+ * Rewrites an image URL to a size-bounded, WebP-encoded version served by imgproxy.
+ * Returns the URL untouched when rewriting does not apply, so callers can pass anything.
+ */
+export const resizedImageUrlFor = url => {
+  if (typeof url !== "string") return url;
+  // Blob and data URLs are already local, and "error" is the sentinel for the error texture.
+  if (!(url.startsWith("http:") || url.startsWith("https:"))) return url;
+  // Never re-wrap something we already wrapped.
+  if (url.includes(`${IMAGE_RESIZE_PATH}/`)) return url;
+
+  const dimension = maxImageDimension();
+
+  try {
+    // rs:fit bounds both axes while preserving aspect; the trailing 0 stops imgproxy
+    // from upscaling images that are already smaller than the budget.
+    return (
+      `${IMAGE_RESIZE_PATH}/insecure/rs:fit:${dimension}:${dimension}:0/q:${RESIZED_IMAGE_QUALITY}/` +
+      `${imgproxyEncodeUrl(url)}.webp`
+    );
+  } catch (e) {
+    console.warn("Could not build a resized image URL, falling back to the original.", e);
+    return url;
+  }
 };
 
 export const isNonCorsProxyDomain = hostname => {
