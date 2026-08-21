@@ -77,8 +77,20 @@ export const resolveUrl = async (url, quality = null, version = 1, bustCache) =>
     return response.json();
   });
 
-  resolveUrlCache.set(key, resultPromise);
-  return resultPromise;
+  // vegamix: a rejected promise must not stay in the cache. This map keeps the
+  // promise itself, so one failed resolve — a CORS blip, a service restarting,
+  // a slow screenshot — used to poison that url+version for the rest of the
+  // page's life: every retry, and every fresh paste of the same link, got the
+  // same dead promise back and the widget spun forever until an F5. Same class
+  // of bug as the inflightTextures and inflightGltfs leaks fixed earlier.
+  resolveUrlCache.set(
+    key,
+    resultPromise.catch(error => {
+      resolveUrlCache.delete(key);
+      throw error;
+    })
+  );
+  return resolveUrlCache.get(key);
 };
 
 export const upload = (file, desiredContentType) => {
