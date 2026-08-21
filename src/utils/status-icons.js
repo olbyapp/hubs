@@ -58,9 +58,14 @@ export function getPrivateZoneIconTexture() {
 // no text at all. Painted into a canvas for the same reason the status glyphs
 // are — the nametag font is MSDF and has no emoji — and drawn as one strip
 // rather than one mesh per award so a name tag adds no draw calls per award.
+//
+// The canvas is cut to the glyphs' real bounding box rather than to the font
+// size. An emoji sits well above the "middle" baseline, so a canvas centred
+// the easy way carries a band of empty pixels underneath — which on the name
+// tag read as the icons hugging the name with a gap below them.
 const ACHIEVEMENT_ICON_PIXELS = 64;
-const ACHIEVEMENT_ICON_FONT = `${Math.round(ACHIEVEMENT_ICON_PIXELS * 0.78)}px sans-serif`;
-const ACHIEVEMENT_ICON_GAP = 10;
+const ACHIEVEMENT_ICON_FONT = `${ACHIEVEMENT_ICON_PIXELS}px sans-serif`;
+const ACHIEVEMENT_ICON_GAP = 12;
 const achievementIconTextures = new Map();
 
 // Returns { texture, aspect } — aspect being width/height, so the caller can
@@ -72,25 +77,38 @@ export function getAchievementIconsTexture(emoji) {
 
   const measuring = document.createElement("canvas").getContext("2d");
   measuring.font = ACHIEVEMENT_ICON_FONT;
-  const widths = emoji.map(glyph => Math.ceil(measuring.measureText(glyph).width));
-  const width = widths.reduce((total, each) => total + each, 0) + ACHIEVEMENT_ICON_GAP * (emoji.length + 1);
+  const measured = emoji.map(glyph => {
+    const metrics = measuring.measureText(glyph);
+    return {
+      glyph,
+      width: Math.ceil(metrics.width),
+      // Not every browser fills these in; the font size is a fair stand-in.
+      ascent: Math.ceil(metrics.actualBoundingBoxAscent || ACHIEVEMENT_ICON_PIXELS * 0.8),
+      descent: Math.ceil(metrics.actualBoundingBoxDescent || ACHIEVEMENT_ICON_PIXELS * 0.1)
+    };
+  });
+
+  const ascent = Math.max(...measured.map(m => m.ascent));
+  const descent = Math.max(...measured.map(m => m.descent));
+  const height = ascent + descent;
+  const width = measured.reduce((total, each) => total + each.width, 0) + ACHIEVEMENT_ICON_GAP * (emoji.length - 1);
 
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = ACHIEVEMENT_ICON_PIXELS;
+  canvas.width = Math.max(1, width);
+  canvas.height = Math.max(1, height);
   const context = canvas.getContext("2d");
   context.font = ACHIEVEMENT_ICON_FONT;
   context.textAlign = "left";
-  context.textBaseline = "middle";
-  let x = ACHIEVEMENT_ICON_GAP;
-  emoji.forEach((glyph, index) => {
-    context.fillText(glyph, x, ACHIEVEMENT_ICON_PIXELS / 2);
-    x += widths[index] + ACHIEVEMENT_ICON_GAP;
-  });
+  context.textBaseline = "alphabetic";
+  let x = 0;
+  for (const each of measured) {
+    context.fillText(each.glyph, x, ascent);
+    x += each.width + ACHIEVEMENT_ICON_GAP;
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
-  const entry = { texture, aspect: width / ACHIEVEMENT_ICON_PIXELS };
+  const entry = { texture, aspect: canvas.width / canvas.height };
   achievementIconTextures.set(key, entry);
   return entry;
 }
