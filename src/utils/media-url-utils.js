@@ -37,6 +37,52 @@ const farsparkEncodeUrl = url => {
   return b64EncodeUnicode(url).replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 };
 
+// vegamix: media pinned in a room is served at whatever resolution it was uploaded at,
+// which for phone photos means 5000+ px and tens of megabytes on every single join.
+// Route still images through imgproxy so the client only ever fetches a bounded version.
+// Same-origin on purpose: no CORS, no extra certificate, no config plumbing.
+const IMAGE_RESIZE_PATH = "/_imgproxy";
+const MAX_IMAGE_DIMENSION_DESKTOP = 2048;
+const MAX_IMAGE_DIMENSION_MOBILE = 1024;
+// Quality is a WebP quality, not a JPEG one — 82 is visually clean at these sizes.
+const RESIZED_IMAGE_QUALITY = 82;
+
+// imgproxy takes the source URL base64url-encoded, which keeps access tokens and
+// query strings intact without any escaping games.
+const imgproxyEncodeUrl = url => b64EncodeUnicode(url).replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+
+export const maxImageDimension = () => (isMobile() ? MAX_IMAGE_DIMENSION_MOBILE : MAX_IMAGE_DIMENSION_DESKTOP);
+
+/**
+ * Rewrites an image URL to a size-bounded, WebP-encoded version served by imgproxy.
+ * Returns the URL untouched when rewriting does not apply, so callers can pass anything.
+ */
+// rs:fit bounds both axes while preserving aspect; the trailing 0 stops imgproxy
+// from upscaling images that are already smaller than the budget. Returns null when
+// the URL is not something we can rewrite, so callers keep their own fallback.
+const imgproxyUrlFor = (url, width, height) => {
+  if (typeof url !== "string") return null;
+  // Blob and data URLs are already local, and "error" is the sentinel for the error texture.
+  if (!(url.startsWith("http:") || url.startsWith("https:"))) return null;
+  // Never re-wrap something we already wrapped.
+  if (url.includes(`${IMAGE_RESIZE_PATH}/`)) return null;
+
+  try {
+    return (
+      `${IMAGE_RESIZE_PATH}/insecure/rs:fit:${Math.round(width)}:${Math.round(height)}:0/` +
+      `q:${RESIZED_IMAGE_QUALITY}/${imgproxyEncodeUrl(url)}.webp`
+    );
+  } catch (e) {
+    console.warn("Could not build a resized image URL, falling back to the original.", e);
+    return null;
+  }
+};
+
+export const resizedImageUrlFor = url => {
+  const dimension = maxImageDimension();
+  return imgproxyUrlFor(url, dimension, dimension) || url;
+};
+
 export const scaledThumbnailUrlFor = (url, width, height) => {
   let extension = "";
   try {
@@ -63,7 +109,12 @@ export const scaledThumbnailUrlFor = (url, width, height) => {
 
     if (hasReticulumServer()) {
       const retHostname = new URL(`https://${configs.RETICULUM_SERVER}`).hostname;
-      if (retHostname === urlHostname) return url;
+      if (retHostname === urlHostname) {
+        // vegamix: our own files used to be handed back at full size here, so the avatar
+        // and scene browsers were downloading multi-megabyte originals as thumbnails
+        // (35 avatars cost 65 MB per visit). imgproxy is same-origin, so use it instead.
+        return imgproxyUrlFor(url, width, height) || url;
+      }
     }
   } catch (e) {
     console.warn("couldn't parse server URL ", e);
@@ -71,48 +122,6 @@ export const scaledThumbnailUrlFor = (url, width, height) => {
   }
 
   return thumbnailUrl;
-};
-
-// vegamix: media pinned in a room is served at whatever resolution it was uploaded at,
-// which for phone photos means 5000+ px and tens of megabytes on every single join.
-// Route still images through imgproxy so the client only ever fetches a bounded version.
-// Same-origin on purpose: no CORS, no extra certificate, no config plumbing.
-const IMAGE_RESIZE_PATH = "/_imgproxy";
-const MAX_IMAGE_DIMENSION_DESKTOP = 2048;
-const MAX_IMAGE_DIMENSION_MOBILE = 1024;
-// Quality is a WebP quality, not a JPEG one — 82 is visually clean at these sizes.
-const RESIZED_IMAGE_QUALITY = 82;
-
-// imgproxy takes the source URL base64url-encoded, which keeps access tokens and
-// query strings intact without any escaping games.
-const imgproxyEncodeUrl = url => b64EncodeUnicode(url).replace(/=+$/g, "").replace(/\+/g, "-").replace(/\//g, "_");
-
-export const maxImageDimension = () => (isMobile() ? MAX_IMAGE_DIMENSION_MOBILE : MAX_IMAGE_DIMENSION_DESKTOP);
-
-/**
- * Rewrites an image URL to a size-bounded, WebP-encoded version served by imgproxy.
- * Returns the URL untouched when rewriting does not apply, so callers can pass anything.
- */
-export const resizedImageUrlFor = url => {
-  if (typeof url !== "string") return url;
-  // Blob and data URLs are already local, and "error" is the sentinel for the error texture.
-  if (!(url.startsWith("http:") || url.startsWith("https:"))) return url;
-  // Never re-wrap something we already wrapped.
-  if (url.includes(`${IMAGE_RESIZE_PATH}/`)) return url;
-
-  const dimension = maxImageDimension();
-
-  try {
-    // rs:fit bounds both axes while preserving aspect; the trailing 0 stops imgproxy
-    // from upscaling images that are already smaller than the budget.
-    return (
-      `${IMAGE_RESIZE_PATH}/insecure/rs:fit:${dimension}:${dimension}:0/q:${RESIZED_IMAGE_QUALITY}/` +
-      `${imgproxyEncodeUrl(url)}.webp`
-    );
-  } catch (e) {
-    console.warn("Could not build a resized image URL, falling back to the original.", e);
-    return url;
-  }
 };
 
 export const isNonCorsProxyDomain = hostname => {
