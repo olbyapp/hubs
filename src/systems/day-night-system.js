@@ -371,6 +371,12 @@ export class DayNightSystem {
 
     this.daySphere = this.captureSkySphere(root.object3D, config.daySphereName);
     this.nightSphere = this.captureSkySphere(root.object3D, config.nightSphereName);
+    if (!this.daySphere !== !this.nightSphere) {
+      console.warn(
+        "[day-night] найдена только одна сфера неба из двух — растворение выключено, сцена не тронута. " +
+          "Узел, выключенный в Spoke, в опубликованную сцену не попадает: включить и опубликовать заново."
+      );
+    }
     this.captureSky();
   }
 
@@ -609,7 +615,10 @@ export class DayNightSystem {
   }
 
   applySkySpheres(day) {
-    if (!this.daySphere && !this.nightSphere) return;
+    // Растворять есть смысл только когда есть ОБЕ сферы. С одной мы бы прятали
+    // единственное небо сцены, подменяя его ничем: половину суток небо просто пропадало бы.
+    // Поэтому при неполной паре не трогаем вообще ничего — сцена остаётся авторской.
+    if (!this.daySphere || !this.nightSphere) return;
     this.attachSkySpheres();
     // Дневная сфера — непрозрачная подложка, ночная растворяется поверх неё по той же фазе,
     // что экспозиция и туман: пока солнце идёт от +8° к -6°, ночь проступает целиком.
