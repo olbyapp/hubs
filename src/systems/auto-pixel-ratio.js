@@ -1,3 +1,5 @@
+import detectMobile, { isMobileVR } from "../utils/is-mobile";
+
 // On high-DPI displays, measures the median FPS over time and reduces the
 // pixelRatio if the FPS drops below a threshold.
 
@@ -11,9 +13,13 @@ const NUM_TIMES_DECREASED_BEFORE_CHANGING_MAX_PIXEL_RATIO = 3;
 
 AFRAME.registerSystem("auto-pixel-ratio", {
   init() {
-    // For now let's only enabled this on macs, since they tend to have retina displays.
-    // Note this test will also include iPads running iPadOS.
-    this.enabled = window.devicePixelRatio > 1 && /macintosh/i.test(navigator.userAgent);
+    // Stock Hubs only ran this on Macs, on the theory that retina displays are where
+    // the problem is. Phones have the same problem and worse hardware: an Android at
+    // devicePixelRatio 3 renders 9x the fragments of a 1x pass. Let the measured frame
+    // rate lower the ratio there too.
+    // Note the macintosh test also covers iPads running iPadOS.
+    this.enabled =
+      window.devicePixelRatio > 1 && (/macintosh/i.test(navigator.userAgent) || detectMobile() || isMobileVR());
     this.deltas = [];
     this.secondsSinceMeasurementStart = 0;
     this.secondsSinceSceneVisible = 0;

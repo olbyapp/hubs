@@ -4,6 +4,8 @@ import { AEntity, Networked, Object3DTag, Owned } from "./bit-components";
 import MediaSearchStore from "./storage/media-search-store";
 import Store from "./storage/store";
 import qsTruthy from "./utils/qs_truthy";
+import { qsGet } from "./utils/qs_truthy";
+import detectMobile, { isMobileVR } from "./utils/is-mobile";
 
 import type { AComponent, AScene } from "aframe";
 import HubChannel from "./utils/hub-channel";
@@ -189,7 +191,16 @@ export class App {
     // We manually handle resetting this in mainTick so that stats are correctly reported with post effects enabled
     renderer.info.autoReset = false;
 
-    renderer.setPixelRatio(window.devicePixelRatio);
+    // vegamix: phones routinely report devicePixelRatio 2.75-4, so rendering at native
+    // resolution costs 8-16x the fragments of a 1x pass - on a scene that is PBR with
+    // four realtime lights. Cap it; auto-pixel-ratio can still lower it further if the
+    // measured frame rate says so. Override with ?max_mobile_pixel_ratio=N.
+    const qsPixelRatio = parseFloat(qsGet("max_mobile_pixel_ratio") || "");
+    const maxMobilePixelRatio = Number.isFinite(qsPixelRatio) && qsPixelRatio > 0 ? qsPixelRatio : 1.5;
+    const isMobileClient = detectMobile() || isMobileVR();
+    renderer.setPixelRatio(
+      isMobileClient ? Math.min(window.devicePixelRatio, maxMobilePixelRatio) : window.devicePixelRatio
+    );
 
     renderer.debug.checkShaderErrors = qsTruthy("checkShaderErrors");
 
