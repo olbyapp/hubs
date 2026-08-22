@@ -53,19 +53,6 @@ const getScreenHeight = () => {
   return screen.height;
 };
 
-// Physical pixels screen resolution width
-// (screen.width * window.devicePixelRatio) seems to be too huge and
-// can cause bad performance impact. So use CSS pixels screen width
-// (screen.width) by default for now.
-const getDefaultMaxResolutionWidth = () => {
-  return getScreenWidth();
-};
-
-// See the comment above
-const getDefaultMaxResolutionHeight = () => {
-  return getScreenHeight();
-};
-
 // Return the screen resolution width in physical pixels based on the current screen orientation
 export const getScreenResolutionWidth = () => {
   return getScreenWidth() * window.devicePixelRatio;
@@ -74,6 +61,26 @@ export const getScreenResolutionWidth = () => {
 // Return the screen resolution height in physical pixels based on the current screen orientation
 export const getScreenResolutionHeight = () => {
   return getScreenHeight() * window.devicePixelRatio;
+};
+
+// vegamix: these are documented - and consumed - as PHYSICAL pixels: useResizeViewport
+// divides them by devicePixelRatio to get a CSS-pixel canvas size. Stock returned CSS
+// pixels here instead, so the division happened a second time and the canvas came out
+// at 1/devicePixelRatio of the screen: 393 / 3 = 131 px wide on an iPhone, then
+// stretched back over the full screen. That is why mobile always looked soft, and why
+// raising the pixel ratio never helped - a larger ratio only made maxWidth smaller by
+// the same factor, so the two cancelled exactly.
+//
+// The original intent was to keep the fragment count down. That is what the pixel ratio
+// is for, and auto-pixel-ratio now lowers it from measured frame rate on mobile too, so
+// the resolution cap can simply be the screen.
+const getDefaultMaxResolutionWidth = () => {
+  return getScreenResolutionWidth();
+};
+
+// See the comment above
+const getDefaultMaxResolutionHeight = () => {
+  return getScreenResolutionHeight();
 };
 
 // Take width and height based on the current screen orientation and
