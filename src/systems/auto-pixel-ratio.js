@@ -55,7 +55,15 @@ AFRAME.registerSystem("auto-pixel-ratio", {
       const shouldDecrease = currentPixelRatio > MIN_PIXEL_RATIO && medianFps < LOW_FPS_THRESHOLD;
       const shouldIncrease = currentPixelRatio < this.maxPixelRatio && medianFps > HIGH_FPS_THRESHOLD;
       if (shouldDecrease || shouldIncrease) {
-        const newPixelRatio = currentPixelRatio + (CHANGE_RATE * shouldIncrease ? 1 : -1);
+        // vegamix: the step is a whole 1, and stock only checked that the CURRENT ratio
+        // is above the minimum - fine while ratios were integers (3 -> 2 -> 1), but a
+        // non-integer cap made a decrease land at 0.5, i.e. half the logical resolution.
+        // Clamp the result instead of trusting the starting value to be an integer.
+        const newPixelRatio = Math.min(
+          this.maxPixelRatio,
+          Math.max(MIN_PIXEL_RATIO, currentPixelRatio + CHANGE_RATE * (shouldIncrease ? 1 : -1))
+        );
+        if (newPixelRatio === currentPixelRatio) return;
         console.info(
           `Hubs auto-pixel-ratio: Median FPS (${medianFps.toFixed()}) was ${
             shouldIncrease ? `above ${HIGH_FPS_THRESHOLD}` : `below ${LOW_FPS_THRESHOLD}`

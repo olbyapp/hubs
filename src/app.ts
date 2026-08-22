@@ -196,7 +196,10 @@ export class App {
     // four realtime lights. Cap it; auto-pixel-ratio can still lower it further if the
     // measured frame rate says so. Override with ?max_mobile_pixel_ratio=N.
     const qsPixelRatio = parseFloat(qsGet("max_mobile_pixel_ratio") || "");
-    const maxMobilePixelRatio = Number.isFinite(qsPixelRatio) && qsPixelRatio > 0 ? qsPixelRatio : 1.5;
+    // Whole numbers only: auto-pixel-ratio steps by 1, so a fractional cap sends it
+    // below its own floor on the first decrease. 2 keeps a 3x phone screen sharp, and
+    // the measured frame rate can still take it down to 1 on a weak GPU.
+    const maxMobilePixelRatio = Number.isFinite(qsPixelRatio) && qsPixelRatio > 0 ? qsPixelRatio : 2;
     const isMobileClient = detectMobile() || isMobileVR();
     renderer.setPixelRatio(
       isMobileClient ? Math.min(window.devicePixelRatio, maxMobilePixelRatio) : window.devicePixelRatio
