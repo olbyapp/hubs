@@ -78,3 +78,35 @@
   pointer-events: none;
   background-color: theme.$transparent;
 }
+
+:local(.count) {
+  font-variant-numeric: tabular-nums;
+}
+
+// vegamix: in portrait this bar ran off the right edge of a phone - "Objects" and
+// "People (1)" simply do not fit next to each other. Drop to icons only, but keep the
+// participant count, which is the one piece of information the icon cannot carry.
+@media (orientation: portrait) and (max-width: theme.$breakpoint-sm) {
+  :local(.content-menu) {
+    top: 6px;
+    right: 6px;
+    border-radius: 10px;
+    padding: 2px;
+  }
+
+  :local(.content-menu-button) {
+    padding: 8px 9px;
+
+    & > * {
+      margin-right: 4px;
+    }
+  }
+
+  :local(.label) {
+    display: none;
+  }
+
+  :local(.separator) {
+    margin: 0 2px;
+  }
+}

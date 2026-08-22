@@ -40,3 +40,18 @@
     gap: unset;
   }
 }
+
+// vegamix: 96px of fixed chrome plus the top bar left almost nothing of a portrait
+// phone screen for the room itself. Labels stay - people navigate this bar by reading
+// it, and "Private" or "Status" are not guessable from the icon alone - but everything
+// around them shrinks.
+@media (orientation: portrait) and (max-width: theme.$breakpoint-sm) {
+  :local(.toolbar) {
+    height: 62px;
+    padding: 4px 6px;
+  }
+
+  :local(.content) {
+    gap: 0 6px;
+  }
+}
