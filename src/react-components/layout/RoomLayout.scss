@@ -8,9 +8,11 @@
     // vegamix: `auto` sizes to max-content and is allowed to overflow the grid, so a
     // wide child could push the column past the screen - taking the absolutely
     // positioned top bar (right: 6px of this column) off the right edge with it.
-    // minmax(0, ...) forbids that; the column can never exceed the container.
+    // 1fr fills the free space instead, and the 0 minimum forbids that overflow.
+    // Not minmax(0, auto): only plain `auto` tracks get stretched to fill leftover
+    // space, so that leaves the column at content width and a strip down the side.
 
-    [main] minmax(0, auto)
+    [main] minmax(0, 1fr)
     [sidebar] minmax(0, min-content);
 
   grid-template-rows:
