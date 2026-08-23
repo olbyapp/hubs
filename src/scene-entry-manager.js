@@ -30,6 +30,7 @@ import { spawnFromFileList, spawnFromUrl } from "./load-media-on-paste-or-drop";
 import { isLockedDownDemoRoom } from "./utils/hub-utils";
 import { isCallRinging, startCallRinging } from "./utils/call-state";
 import { startOfficeStats } from "./utils/office-stats";
+import { startBackgroundMediaGuard } from "./utils/background-media-guard";
 
 export default class SceneEntryManager {
   constructor(hubChannel, authChannel, history) {
@@ -139,6 +140,11 @@ export default class SceneEntryManager {
     // that the lobby, the entry flow and the bot path above never count as
     // time spent in the office.
     startOfficeStats();
+
+    // Stop broadcasting to a room nobody is looking at: mic and camera go off when
+    // the tab is hidden and come back with it. Started here so the entry flow, where
+    // the mic is deliberately live for the level meter, is never affected.
+    startBackgroundMediaGuard(this.scene);
 
     APP.mediaDevicesManager.micEnabled = !muteOnEntry;
   };

@@ -133,16 +133,16 @@ export default class MediaDevicesManager extends EventEmitter {
     return this._mediaStream?.getVideoTracks().length > 0;
   }
 
+  // vegamix: both of these had a block body with no return, so some() saw undefined
+  // every time and they were permanently false. The share popover reads isWebcamShared
+  // to decide which source is live, so a shared camera was being reported as a shared
+  // screen.
   get isWebcamShared() {
-    return this._mediaStream.getVideoTracks().some(track => {
-      track["_hubs_contentHint"] === MediaDevices.CAMERA;
-    });
+    return this._mediaStream.getVideoTracks().some(track => track["_hubs_contentHint"] === MediaDevices.CAMERA);
   }
 
   get isScreenShared() {
-    return this._mediaStream.getVideoTracks().some(track => {
-      track["_hubs_contentHint"] === MediaDevices.SCREEN;
-    });
+    return this._mediaStream.getVideoTracks().some(track => track["_hubs_contentHint"] === MediaDevices.SCREEN);
   }
 
   set micEnabled(enabled) {
