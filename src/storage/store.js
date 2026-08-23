@@ -84,6 +84,10 @@ export const SCHEMA = {
         // has no property for.
         pronouns: { type: "string", pattern: "^([a-zA-Z]{1,32}[\\/, ]\\s*){0,4}[a-zA-Z]{1,32}$" },
         status: { type: "string", enum: ["none", "work", "eat", "thinking", "afk"] },
+        // Whether this person's tab is backgrounded. Lives on the profile, not
+        // because it is part of an identity, but because profile changes are the
+        // one thing hub-channel re-broadcasts to everyone with no server work.
+        hidden: { type: "bool" },
         // Weekly office award (vegamix), decided by hub-stats and written back
         // here so presence carries it to everyone exactly the way status is
         // carried. Empty means "no award this week"; achievementCount is how

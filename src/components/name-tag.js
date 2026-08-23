@@ -9,7 +9,12 @@ import { textureLoader } from "../utils/media-utils";
 
 import handRaisedIconSrc from "../assets/hud/hand-raised.png";
 import { STATUS_LABELS, STATUS_COLORS } from "../utils/user-status";
-import { getAchievementIconsTexture, getPrivateZoneIconTexture, getStatusIconTexture } from "../utils/status-icons";
+import {
+  getAchievementIconsTexture,
+  getAwayIconTexture,
+  getPrivateZoneIconTexture,
+  getStatusIconTexture
+} from "../utils/status-icons";
 import { achievementEmoji } from "../utils/achievements";
 import { isSessionInPrivateZone } from "../utils/private-zone";
 import { CAMERA_MODE_TOP_DOWN } from "../systems/camera-system";
@@ -157,6 +162,17 @@ AFRAME.registerComponent("name-tag", {
     );
     this.privateZoneIcon.visible = false;
     this.el.object3D.add(this.privateZoneIcon);
+
+    // Eye icon: this person's tab is in the background, so they are not looking at
+    // the room. Worth showing - otherwise they read as present but unresponsive.
+    this.isPageHidden = false;
+    this.awayIconSize = 0;
+    this.awayIcon = new THREE.Mesh(
+      statusIconGeometry,
+      new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false })
+    );
+    this.awayIcon.visible = false;
+    this.el.object3D.add(this.awayIcon);
 
     this.nametagVolume = new THREE.Mesh(nametagVolumeGeometry, nametagVolumeMaterial);
     this.nametagVolume.position.set(0, this.nameTagVolumeY, 0.001);
@@ -319,6 +335,7 @@ AFRAME.registerComponent("name-tag", {
     // Everyone carries a status now, including those who never opened the
     // picker, so the plate always has a label and an icon.
     this.status = presenceMeta.profile.status || "none";
+    this.isPageHidden = !!presenceMeta.profile.hidden;
     this.isRecording = !!(presenceMeta.streaming || presenceMeta.recording);
     this.isOwner = !!(presenceMeta.roles && presenceMeta.roles.owner);
     this.isTyping = !!presenceMeta.typing;
@@ -491,7 +508,17 @@ AFRAME.registerComponent("name-tag", {
     const iconSize = this.nameTagHeight - NAMETAG_STATUS_ICON_PADDING * 2;
     this.statusIconSize = getStatusIconTexture(this.status) ? iconSize : 0;
     this.privateZoneIconSize = this.isInPrivateZone ? iconSize : 0;
-    this.textOffsetX = -(this.statusIconSize + this.privateZoneIconSize) / 2;
+    this.awayIconSize = this.isPageHidden ? iconSize : 0;
+    this.textOffsetX = -(this.statusIconSize + this.privateZoneIconSize + this.awayIconSize) / 2;
+
+    const awayTexture = this.awayIconSize ? getAwayIconTexture() : null;
+    this.awayIcon.visible = !!awayTexture;
+    if (awayTexture) {
+      this.awayIcon.material.map = awayTexture;
+      this.awayIcon.material.needsUpdate = true;
+      this.awayIcon.scale.setScalar(this.awayIconSize);
+      this.awayIcon.matrixNeedsUpdate = true;
+    }
 
     const texture = this.privateZoneIconSize ? getPrivateZoneIconTexture() : null;
     this.privateZoneIcon.visible = !!texture;
@@ -522,6 +549,11 @@ AFRAME.registerComponent("name-tag", {
       height: this.nameTagHeight + NAMETAG_STATUS_BORDER_PADDING
     });
     let iconRight = width / 2 - NAMETAG_STATUS_ICON_PADDING;
+    if (this.awayIconSize) {
+      this.awayIcon.position.set(iconRight - this.awayIconSize / 2, 0, 0.002);
+      this.awayIcon.matrixNeedsUpdate = true;
+      iconRight -= this.awayIconSize;
+    }
     if (this.privateZoneIconSize) {
       this.privateZoneIcon.position.set(iconRight - this.privateZoneIconSize / 2, 0, 0.002);
       this.privateZoneIcon.matrixNeedsUpdate = true;

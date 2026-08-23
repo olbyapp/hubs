@@ -92,3 +92,12 @@
     background-color: theme.$disabled-bg-color;
   }
 }
+
+// vegamix: "this person's tab is in the background". Sits left of the name, muted
+// rather than coloured - it reports a fact, it is not a warning about anybody.
+:local(.away-icon) {
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.75;
+  flex-shrink: 0;
+}

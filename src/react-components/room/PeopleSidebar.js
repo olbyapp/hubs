@@ -7,6 +7,7 @@ import { Sidebar } from "../sidebar/Sidebar";
 import { CloseButton } from "../input/CloseButton";
 import { IconButton } from "../input/IconButton";
 import { ReactComponent as StarIcon } from "../icons/Star.svg";
+import { AWAY_GLYPH } from "../../utils/status-icons";
 import { ReactComponent as DesktopIcon } from "../icons/Desktop.svg";
 import { ReactComponent as DiscordIcon } from "../icons/Discord.svg";
 import { ReactComponent as PhoneIcon } from "../icons/Phone.svg";
@@ -229,6 +230,17 @@ export function PeopleSidebar({
                       <UserSoundOnIcon />
                     )}
                   </ToolTip>
+                )}
+                {person.profile && person.profile.hidden && (
+                  <span
+                    className={styles.awayIcon}
+                    title={intl.formatMessage({
+                      id: "people-sidebar.not-looking-label",
+                      defaultMessage: "Not looking at the room"
+                    })}
+                  >
+                    {AWAY_GLYPH}
+                  </span>
                 )}
                 <p className={styles.personName}>{getPersonName(person, intl)}</p>
                 <AchievementBadges person={person} />

@@ -1,27 +1,23 @@
 import { MediaDevicesEvents } from "./media-devices-utils";
 
-// Turn off what a backgrounded tab has no business still sending: nobody expects to
-// still be heard, or seen, after switching to another tab or minimising the window.
+// Two things happen when the tab stops being looked at.
 //
-// The three streams are NOT equivalent, and the difference decides the design:
+// 1. The microphone and camera go off. Nobody expects to still be heard or seen
+//    after switching to another tab or minimising the window, and both come back
+//    exactly as they were on return - getUserMedia needs no user gesture once
+//    permission has been granted.
 //
-// - Microphone and camera can be restored without asking. getUserMedia does not need
-//   a user gesture once permission is granted, so we can put them back exactly as we
-//   found them when the person returns.
-// - A screen share cannot. getDisplayMedia requires a transient user activation, so
-//   anything we stop here is stopped for good - the person has to press Share again.
-//   That makes stopping it a much heavier decision, and it gets a grace period.
+//    Unless a screen share is running. Presenting and then going to look at what
+//    you are presenting is the normal way to use it, and you are usually talking
+//    over it, so a share suppresses all of this: mic, camera and the share itself
+//    are left alone. (It could not restore a stopped share anyway - getDisplayMedia
+//    requires a user gesture, so stopping one is a one-way door.)
 //
-// Screen sharing also has a workflow that directly conflicts with this feature: when
-// somebody shares a browser tab, they switch to that tab, which backgrounds Hubs for
-// as long as they are presenting. Those shares are left alone entirely.
-
-// How long the tab must stay hidden before a screen share is given up. Long enough
-// that flicking to another tab and back does not cost a share you cannot restore.
-const SCREEN_SHARE_GRACE_MS = 60000;
+// 2. The state is published so everyone else can see it. It rides in profile
+//    presence meta, the same way user status does, so it needs no Reticulum
+//    changes: hub-channel re-broadcasts the profile on every change.
 
 let scene = null;
-let screenShareTimer = null;
 
 // What was on when the tab went away, so it can be put back.
 const suspended = {
@@ -33,20 +29,31 @@ function mediaDevicesManager() {
   return window.APP && window.APP.mediaDevicesManager;
 }
 
-// Chrome reports what kind of surface is being shared. A shared browser tab means the
-// person is about to go and look at it, so backgrounding Hubs is expected, not idle.
-function isSharingBrowserTab(manager) {
-  const stream = manager._mediaStream;
-  if (!stream) return false;
-  return stream.getVideoTracks().some(track => {
-    const settings = typeof track.getSettings === "function" ? track.getSettings() : null;
-    return settings && settings.displaySurface === "browser";
-  });
+function isScreenSharing() {
+  const manager = mediaDevicesManager();
+  return !!manager && manager.isVideoShared && manager.isScreenShared;
+}
+
+export function isPageHidden() {
+  return document.visibilityState === "hidden";
+}
+
+function publishHidden(hidden) {
+  const store = window.APP && window.APP.store;
+  if (!store) return;
+  const current = !!(store.state.profile && store.state.profile.hidden);
+  if (current === hidden) return;
+  store.update({ profile: { hidden } });
 }
 
 function onHidden() {
+  publishHidden(true);
+
   const manager = mediaDevicesManager();
   if (!manager || !scene) return;
+
+  // Presenting: leave everything running, including the microphone.
+  if (isScreenSharing()) return;
 
   if (manager.isMicEnabled) {
     suspended.mic = true;
@@ -54,27 +61,13 @@ function onHidden() {
   }
 
   if (manager.isVideoShared) {
-    if (manager.isWebcamShared) {
-      suspended.camera = true;
-      scene.emit(MediaDevicesEvents.VIDEO_SHARE_ENDED);
-    } else if (manager.isScreenShared && !isSharingBrowserTab(manager)) {
-      clearTimeout(screenShareTimer);
-      screenShareTimer = setTimeout(() => {
-        // Re-check: the tab may have come back, or the share may already be over.
-        if (document.visibilityState !== "hidden") return;
-        const current = mediaDevicesManager();
-        if (current && current.isVideoShared && current.isScreenShared) {
-          console.log("Stopping the screen share: the tab has been in the background for a while.");
-          scene.emit(MediaDevicesEvents.VIDEO_SHARE_ENDED);
-        }
-      }, SCREEN_SHARE_GRACE_MS);
-    }
+    suspended.camera = true;
+    scene.emit(MediaDevicesEvents.VIDEO_SHARE_ENDED);
   }
 }
 
 function onVisible() {
-  clearTimeout(screenShareTimer);
-  screenShareTimer = null;
+  publishHidden(false);
 
   const manager = mediaDevicesManager();
   if (!manager || !scene) return;
@@ -100,17 +93,21 @@ function onVisible() {
 export function startBackgroundMediaGuard(sceneEl) {
   scene = sceneEl;
 
+  // The profile is persisted, so a tab closed while hidden would otherwise come
+  // back claiming to be hidden until the first visibility change.
+  publishHidden(isPageHidden());
+
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
+    if (isPageHidden()) {
       onHidden();
     } else {
       onVisible();
     }
   });
 
-  // A stream the person stopped by hand while we were hidden must not come back when
-  // they return, so forget our note as soon as they take over.
+  // A camera the person switched off by hand while we were away must not come back
+  // when they return, so drop our note as soon as they take over.
   scene.addEventListener(MediaDevicesEvents.VIDEO_SHARE_ENDED, () => {
-    if (document.visibilityState === "visible") suspended.camera = false;
+    if (!isPageHidden()) suspended.camera = false;
   });
 }

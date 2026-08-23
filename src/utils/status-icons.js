@@ -17,6 +17,13 @@ export const STATUS_GLYPHS = {
 // Same treatment for "this person is in a private zone".
 export const PRIVATE_ZONE_GLYPH = "👂";
 
+// "This person's tab is in the background." Shared with the People panel so the
+// two places that show it cannot drift apart.
+export const AWAY_GLYPH = "👁";
+// Grey rather than a status colour: this is not a state anyone chose, and it should
+// read as information rather than as an alert.
+export const AWAY_COLOR = "#9aa0a6";
+
 const ICON_PIXELS = 128;
 const textureByKey = new Map();
 
@@ -52,6 +59,10 @@ export function getStatusIconTexture(status) {
 
 export function getPrivateZoneIconTexture() {
   return getGlyphTexture("private-zone", PRIVATE_ZONE_GLYPH, PRIVATE_ZONE_COLOR);
+}
+
+export function getAwayIconTexture() {
+  return getGlyphTexture("away", AWAY_GLYPH, AWAY_COLOR);
 }
 
 // Award icons for the name tag: the emoji a person holds, side by side, with
