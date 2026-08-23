@@ -5,7 +5,12 @@
   width: 100%;
   height: 100%;
   grid-template-columns:
-    [main] auto
+    // vegamix: `auto` sizes to max-content and is allowed to overflow the grid, so a
+    // wide child could push the column past the screen - taking the absolutely
+    // positioned top bar (right: 6px of this column) off the right edge with it.
+    // minmax(0, ...) forbids that; the column can never exceed the container.
+
+    [main] minmax(0, auto)
     [sidebar] minmax(0, min-content);
 
   grid-template-rows:

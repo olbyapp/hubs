@@ -92,6 +92,10 @@
     right: 6px;
     border-radius: 10px;
     padding: 2px;
+    // Belt and braces: whatever the containing block turns out to be, the bar can
+    // never be wider than the screen it is drawn on.
+    max-width: calc(100vw - 12px);
+    overflow: hidden;
   }
 
   :local(.content-menu-button) {
