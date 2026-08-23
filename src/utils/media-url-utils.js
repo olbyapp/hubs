@@ -283,6 +283,31 @@ export const guessContentType = url => {
   return commonKnownContentTypes[extension];
 };
 
+// Hosts that serve bytes and never serve a room. Asking one of them whether it
+// is a Hubs server means a HEAD on its root, which answers 404 without a CORS
+// header, so the answer we already know costs a failed request in the console
+// on every room load. The page's own origin is deliberately not in here:
+// BASE_ASSETS_PATH resolves to it when assets come from the same host, and
+// isLocalHubsUrl needs the real answer for that one.
+const knownNonHubsOrigins = (() => {
+  const origins = new Set();
+  for (const hostOrUrl of [
+    configs.BASE_ASSETS_PATH,
+    configs.THUMBNAIL_SERVER,
+    configs.CORS_PROXY_SERVER,
+    configs.UPLOADS_HOST
+  ]) {
+    if (!hostOrUrl) continue;
+    try {
+      origins.add(new URL(hostOrUrl.startsWith("http") ? hostOrUrl : `https://${hostOrUrl}`).origin);
+    } catch {
+      // Ignore
+    }
+  }
+  origins.delete(document.location.origin);
+  return origins;
+})();
+
 const originIsHubsServer = new Map();
 async function isHubsServer(url) {
   if (!url) return false;
@@ -290,6 +315,8 @@ async function isHubsServer(url) {
     url = "https://" + url;
   }
   const { origin } = new URL(url);
+
+  if (knownNonHubsOrigins.has(origin)) return false;
 
   if (originIsHubsServer.has(origin)) {
     return originIsHubsServer.get(origin);

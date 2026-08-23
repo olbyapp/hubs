@@ -81,8 +81,10 @@ export const SCHEMA = {
         // No longer editable and no longer shown: the line under the name is
         // the weekly award now. Kept in the schema because profiles saved
         // before that still carry the field, and the store rejects state it
-        // has no property for.
-        pronouns: { type: "string", pattern: "^([a-zA-Z]{1,32}[\\/, ]\\s*){0,4}[a-zA-Z]{1,32}$" },
+        // has no property for. Kept without its pattern, too: most of those
+        // profiles carry an empty string, which the pattern refused, so every
+        // update logged an error and dropped the field all over again.
+        pronouns: { type: "string" },
         status: { type: "string", enum: ["none", "work", "eat", "thinking", "afk"] },
         // Whether this person's tab is backgrounded. Lives on the profile, not
         // because it is part of an identity, but because profile changes are the
