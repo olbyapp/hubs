@@ -25,9 +25,6 @@ export const PRIVATE_ZONE_GLYPH = "👂";
 // icon's grey disc. U+FE0F forces the emoji form. The DOM in the People panel picked
 // a colour font by itself, which is why it looked fine there and blank on the tag.
 export const AWAY_GLYPH = "👁️";
-// Grey rather than a status colour: this is not a state anyone chose, and it should
-// read as information rather than as an alert.
-export const AWAY_COLOR = "#9aa0a6";
 
 const ICON_PIXELS = 128;
 const textureByKey = new Map();
@@ -66,8 +63,44 @@ export function getPrivateZoneIconTexture() {
   return getGlyphTexture("private-zone", PRIVATE_ZONE_GLYPH, PRIVATE_ZONE_COLOR);
 }
 
+// The away icon is drawn differently from the status and private-zone ones: no
+// coloured disc, and cut to the glyph's real bounding box. It sits in front of the
+// name rather than in the icon row, so it should read as a small mark next to the
+// text, not as another badge competing with it.
+//
+// The bounding box also fixes the centring. Painting an emoji at the middle of a
+// square canvas assumes the font puts it there, and Android's emoji font does not -
+// the eye sat visibly high in its circle. Measuring puts it right on every platform.
+const AWAY_ICON_PIXELS = 96;
+let awayIconTexture;
+
 export function getAwayIconTexture() {
-  return getGlyphTexture("away", AWAY_GLYPH, AWAY_COLOR);
+  if (awayIconTexture !== undefined) return awayIconTexture;
+
+  const font = `${AWAY_ICON_PIXELS}px sans-serif`;
+  const measuring = document.createElement("canvas").getContext("2d");
+  measuring.font = font;
+  const metrics = measuring.measureText(AWAY_GLYPH);
+
+  // Not every browser fills these in; the font size is a fair stand-in.
+  const ascent = Math.ceil(metrics.actualBoundingBoxAscent || AWAY_ICON_PIXELS * 0.8);
+  const descent = Math.ceil(metrics.actualBoundingBoxDescent || AWAY_ICON_PIXELS * 0.1);
+  const width = Math.max(1, Math.ceil(metrics.width));
+  const height = Math.max(1, ascent + descent);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  context.font = font;
+  context.textAlign = "left";
+  context.textBaseline = "alphabetic";
+  context.fillText(AWAY_GLYPH, 0, ascent);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  awayIconTexture = { texture, aspect: width / height };
+  return awayIconTexture;
 }
 
 // Award icons for the name tag: the emoji a person holds, side by side, with

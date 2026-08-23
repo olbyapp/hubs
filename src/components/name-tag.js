@@ -31,6 +31,8 @@ const NAMETAG_TEXT_Y = 0.1;
 const TYPING_ANIM_SPEED = 150;
 const DISPLAY_NAME_LENGTH = 18;
 const NAMETAG_STATUS_ICON_PADDING = 0.025;
+// The away mark is a fraction of a badge: it goes next to the name, not among them.
+const NAMETAG_AWAY_ICON_SCALE = 0.55;
 // Awards are drawn as icons only — no label. A name reads at a glance and a
 // row of glyphs under it does too; a Cyrillic award name at this size did not,
 // and it collided with the name above it.
@@ -167,6 +169,7 @@ AFRAME.registerComponent("name-tag", {
     // the room. Worth showing - otherwise they read as present but unresponsive.
     this.isPageHidden = false;
     this.awayIconSize = 0;
+    this.awayIconHeight = 0;
     this.awayIcon = new THREE.Mesh(
       statusIconGeometry,
       new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false })
@@ -500,23 +503,30 @@ AFRAME.registerComponent("name-tag", {
     this.updateTheme();
   },
 
-  // Both icons stand at the right end of the plate, filling its height, and the
-  // text is shifted left by half of what they take. Kept apart from
-  // updateElements so a private zone opening or closing does not re-run the
-  // hand-raised animation with it.
+  // The status and private-zone badges stand at the right end of the plate, filling
+  // its height; the away mark sits at the left, in front of the name, at a fraction
+  // of their size. The text is shifted by half the difference between the two sides.
+  // Kept apart from updateElements so a private zone opening or closing does not
+  // re-run the hand-raised animation with it.
   applyIconLayout() {
     const iconSize = this.nameTagHeight - NAMETAG_STATUS_ICON_PADDING * 2;
     this.statusIconSize = getStatusIconTexture(this.status) ? iconSize : 0;
     this.privateZoneIconSize = this.isInPrivateZone ? iconSize : 0;
-    this.awayIconSize = this.isPageHidden ? iconSize : 0;
-    this.textOffsetX = -(this.statusIconSize + this.privateZoneIconSize + this.awayIconSize) / 2;
+    // Deliberately smaller than the badges on the right, and in front of the name
+    // rather than beside them: it is a footnote about where somebody is looking, not
+    // a status they chose, and at badge size it dominated the whole plate.
+    const awayIcon = this.isPageHidden ? getAwayIconTexture() : null;
+    this.awayIconHeight = awayIcon ? iconSize * NAMETAG_AWAY_ICON_SCALE : 0;
+    this.awayIconSize = awayIcon ? this.awayIconHeight * awayIcon.aspect : 0;
 
-    const awayTexture = this.awayIconSize ? getAwayIconTexture() : null;
-    this.awayIcon.visible = !!awayTexture;
-    if (awayTexture) {
-      this.awayIcon.material.map = awayTexture;
+    // Right-hand badges push the text left, the away mark pushes it right.
+    this.textOffsetX = (this.awayIconSize - this.statusIconSize - this.privateZoneIconSize) / 2;
+
+    this.awayIcon.visible = !!awayIcon;
+    if (awayIcon) {
+      this.awayIcon.material.map = awayIcon.texture;
       this.awayIcon.material.needsUpdate = true;
-      this.awayIcon.scale.setScalar(this.awayIconSize);
+      this.awayIcon.scale.set(this.awayIconSize, this.awayIconHeight, 1);
       this.awayIcon.matrixNeedsUpdate = true;
     }
 
@@ -539,7 +549,10 @@ AFRAME.registerComponent("name-tag", {
   },
 
   resizeNameTag() {
-    const width = this.size.x + NAMETAG_BACKGROUND_PADDING * 2 + this.statusIconSize + this.privateZoneIconSize;
+    // Every icon that shares the row has to be in here, or the plate stays the size
+    // of the text alone and the name runs out from under it.
+    const width =
+      this.size.x + NAMETAG_BACKGROUND_PADDING * 2 + this.statusIconSize + this.privateZoneIconSize + this.awayIconSize;
     this.nametagBackground.el.setAttribute("slice9", {
       width,
       height: this.nameTagHeight
@@ -548,12 +561,12 @@ AFRAME.registerComponent("name-tag", {
       width: width + NAMETAG_STATUS_BORDER_PADDING,
       height: this.nameTagHeight + NAMETAG_STATUS_BORDER_PADDING
     });
-    let iconRight = width / 2 - NAMETAG_STATUS_ICON_PADDING;
     if (this.awayIconSize) {
-      this.awayIcon.position.set(iconRight - this.awayIconSize / 2, 0, 0.002);
+      this.awayIcon.position.set(-width / 2 + NAMETAG_STATUS_ICON_PADDING + this.awayIconSize / 2, 0, 0.002);
       this.awayIcon.matrixNeedsUpdate = true;
-      iconRight -= this.awayIconSize;
     }
+
+    let iconRight = width / 2 - NAMETAG_STATUS_ICON_PADDING;
     if (this.privateZoneIconSize) {
       this.privateZoneIcon.position.set(iconRight - this.privateZoneIconSize / 2, 0, 0.002);
       this.privateZoneIcon.matrixNeedsUpdate = true;
