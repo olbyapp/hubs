@@ -42,6 +42,24 @@ const SCREEN_SHARING_SIMULCAST_ENCODINGS = [
   { dtx: true, maxBitrate: 8000000 }
 ];
 
+// vegamix: Chrome and Firefox signal simulcast with RIDs, which the SFU can follow.
+// Safari has no RID path in mediasoup-client, so its handler rewrites the SDP offer
+// instead, inventing one SSRC per layer by counting up from the real one
+// (addLegacySimulcast in handlers/sdp/unifiedPlanUtils). Current WebKit ignores that
+// rewrite and transmits under SSRCs of its own choosing, so the SFU ends up holding
+// bookkeeping for layers that never arrive - "RTP inactivity detected, resetting score
+// to 0" - while dropping the packets that do - "no suitable Producer for received RTP
+// packet". Nobody can consume a layer that does not exist, so remote viewers get a
+// black rectangle. Every browser on iOS is WebKit, so this covers all of them.
+//
+// One encoding means no rewrite: the SSRC in the offer is the one Safari actually
+// sends. The cost is a phone camera without layers to switch between, which matters
+// far less than it not arriving at all.
+function encodingsFor(mediasoupDevice, encodings) {
+  const rewritesSdpForSimulcast = /^Safari/.test((mediasoupDevice && mediasoupDevice.handlerName) || "");
+  return rewritesSdpForSimulcast ? encodings.slice(-1) : encodings;
+}
+
 export const DIALOG_CONNECTION_CONNECTED = "dialog-connection-connected";
 export const DIALOG_CONNECTION_ERROR_FATAL = "dialog-connection-error-fatal";
 
@@ -806,7 +824,7 @@ export class DialogAdapter extends EventEmitter {
       track,
       stopTracks: false,
       codecOptions: { videoGoogleStartBitrate: 1000 },
-      encodings: WEBCAM_SIMULCAST_ENCODINGS,
+      encodings: encodingsFor(this._mediasoupDevice, WEBCAM_SIMULCAST_ENCODINGS),
       zeroRtpOnPause: true,
       disableTrackOnPause: true
     });
@@ -843,7 +861,7 @@ export class DialogAdapter extends EventEmitter {
       track,
       stopTracks: false,
       codecOptions: { videoGoogleStartBitrate: 1000 },
-      encodings: SCREEN_SHARING_SIMULCAST_ENCODINGS,
+      encodings: encodingsFor(this._mediasoupDevice, SCREEN_SHARING_SIMULCAST_ENCODINGS),
       zeroRtpOnPause: true,
       disableTrackOnPause: true,
       appData: {
