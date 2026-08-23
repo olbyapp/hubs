@@ -88,6 +88,10 @@ export const SCHEMA = {
         // because it is part of an identity, but because profile changes are the
         // one thing hub-channel re-broadcasts to everyone with no server work.
         hidden: { type: "bool" },
+        // The mute that goes with it. player-info carries this normally, but NAF
+        // syncs on the animation frame and a hidden tab has none, so the one case
+        // where it matters most is the one case it cannot deliver.
+        micMuted: { type: "bool" },
         // Weekly office award (vegamix), decided by hub-stats and written back
         // here so presence carries it to everyone exactly the way status is
         // carried. Empty means "no award this week"; achievementCount is how
@@ -157,6 +161,10 @@ export const SCHEMA = {
         disableIdleDetection: { type: "bool", default: false },
         fastRoomSwitching: { type: "bool", default: false }, // No longer used. TODO How to remove this safely?
         lazyLoadSceneMedia: { type: "bool", default: defaultLazyLoadSceneMedia },
+        // Off by default: switching tabs mid-conversation and coming back to find
+        // you were cut off is worse than the privacy win for most people, so this
+        // is something you opt into rather than discover.
+        autoMuteWhenHidden: { type: "bool", default: false },
         preferMobileObjectInfoPanel: { type: "bool", default: false },
         // if unset, maxResolution = screen resolution
         maxResolutionWidth: { type: "number", default: undefined },

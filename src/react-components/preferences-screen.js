@@ -402,6 +402,10 @@ const preferenceLabels = defineMessages({
     id: "preferences-screen.preference.disable-sound-effects",
     defaultMessage: "Disable Sound Effects"
   },
+  autoMuteWhenHidden: {
+    id: "preferences-screen.preference.auto-mute-when-hidden",
+    defaultMessage: "Turn off mic and camera while the tab is in the background"
+  },
   disableEchoCancellation: {
     id: "preferences-screen.preference.disable-echo-cancellation",
     defaultMessage: "Disable microphone echo cancellation"
@@ -1162,6 +1166,10 @@ class PreferencesScreen extends Component {
           },
           {
             key: "disableSoundEffects",
+            prefType: PREFERENCE_LIST_ITEM_TYPE.CHECK_BOX
+          },
+          {
+            key: "autoMuteWhenHidden",
             prefType: PREFERENCE_LIST_ITEM_TYPE.CHECK_BOX
           },
           {

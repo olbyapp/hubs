@@ -15,6 +15,12 @@ export function userFromPresence(sessionId, presence, micPresences, mySessionId,
   if (micPresence && !voiceEnabled && !meta.permissions.voice_chat) {
     micPresence.muted = true;
   }
+  // vegamix: a tab in the background muted itself but could not tell anyone - NAF
+  // syncs player-info on the animation frame, which browsers stop when hidden. The
+  // flag comes over presence instead, so trust it while it is set.
+  if (micPresence && meta.profile && meta.profile.micMuted) {
+    micPresence.muted = true;
+  }
   return { id: sessionId, isMe: mySessionId === sessionId, micPresence, ...meta };
 }
 

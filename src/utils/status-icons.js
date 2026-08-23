@@ -19,7 +19,12 @@ export const PRIVATE_ZONE_GLYPH = "👂";
 
 // "This person's tab is in the background." Shared with the People panel so the
 // two places that show it cannot drift apart.
-export const AWAY_GLYPH = "👁";
+//
+// The variation selector is load-bearing: U+1F441 has Emoji_Presentation=No, so on
+// its own a canvas paints it as a thin monochrome outline that vanished against the
+// icon's grey disc. U+FE0F forces the emoji form. The DOM in the People panel picked
+// a colour font by itself, which is why it looked fine there and blank on the tag.
+export const AWAY_GLYPH = "👁️";
 // Grey rather than a status colour: this is not a state anyone chose, and it should
 // read as information rather than as an alert.
 export const AWAY_COLOR = "#9aa0a6";

@@ -38,19 +38,29 @@ export function isPageHidden() {
   return document.visibilityState === "hidden";
 }
 
-function publishHidden(hidden) {
+function publishProfile(patch) {
   const store = window.APP && window.APP.store;
   if (!store) return;
-  const current = !!(store.state.profile && store.state.profile.hidden);
-  if (current === hidden) return;
-  store.update({ profile: { hidden } });
+  const profile = store.state.profile || {};
+  const changed = Object.keys(patch).some(key => !!profile[key] !== !!patch[key]);
+  if (!changed) return;
+  store.update({ profile: patch });
+}
+
+function autoMuteEnabled() {
+  const store = window.APP && window.APP.store;
+  return !!(store && store.state.preferences && store.state.preferences.autoMuteWhenHidden);
 }
 
 function onHidden() {
-  publishHidden(true);
+  // The eye is published whether or not anything is muted: it says where the person
+  // is looking, which is useful on its own.
+  publishProfile({ hidden: true });
 
   const manager = mediaDevicesManager();
   if (!manager || !scene) return;
+
+  if (!autoMuteEnabled()) return;
 
   // Presenting: leave everything running, including the microphone.
   if (isScreenSharing()) return;
@@ -58,6 +68,11 @@ function onHidden() {
   if (manager.isMicEnabled) {
     suspended.mic = true;
     manager.micEnabled = false;
+    // The mute normally reaches other people through player-info, which NAF syncs on
+    // the animation frame - and browsers stop that in a hidden tab, so it would sit
+    // here undelivered until the person came back. Presence goes over the Phoenix
+    // channel instead, which keeps running.
+    publishProfile({ micMuted: true });
   }
 
   if (manager.isVideoShared) {
@@ -67,7 +82,7 @@ function onHidden() {
 }
 
 function onVisible() {
-  publishHidden(false);
+  publishProfile({ hidden: false, micMuted: false });
 
   const manager = mediaDevicesManager();
   if (!manager || !scene) return;
@@ -95,7 +110,7 @@ export function startBackgroundMediaGuard(sceneEl) {
 
   // The profile is persisted, so a tab closed while hidden would otherwise come
   // back claiming to be hidden until the first visibility change.
-  publishHidden(isPageHidden());
+  publishProfile({ hidden: isPageHidden(), micMuted: false });
 
   document.addEventListener("visibilitychange", () => {
     if (isPageHidden()) {
