@@ -72,6 +72,7 @@ export class DialogAdapter extends EventEmitter {
     this._cameraProducer = null;
     this._shareProducer = null;
     this._localMediaStream = null;
+    this._publishing = null;
     this._consumers = new Map();
     this._pendingMediaRequests = new Map();
     this._blockedClients = new Map();
@@ -182,6 +183,19 @@ export class DialogAdapter extends EventEmitter {
     this.emitRTCEvent("log", "RTC", () => `Recreating send transport ICE`);
     await this.closeSendTransport();
     await this.createSendTransport(iceServers);
+
+    // vegamix: closeSendTransport() took the producers down with the old transport,
+    // and nothing used to put them back - setLocalMediaStream() is otherwise only
+    // reached when the signalling connection reconnects and rejoins the room. The
+    // receive side has refreshConsumers for exactly this moment; the send side had no
+    // counterpart, so a send transport that failed ICE - which a lossy connection does
+    // on its own, and a microphone paused for a while invites - left the person
+    // hearing everyone and heard by nobody. Worse, it was unrecoverable from the UI:
+    // with no producer, enableMicrophone() logs "no producer" and returns, so the
+    // mute button and the device list both stopped doing anything until a reload.
+    if (this._localMediaStream) {
+      await this.setLocalMediaStream(this._localMediaStream);
+    }
   }
 
   /**
@@ -752,7 +766,18 @@ export class DialogAdapter extends EventEmitter {
     }
   }
 
+  // vegamix: one at a time. There are now several paths that republish - the rejoin,
+  // the transport coming back, the mute button finding no producer, a device change -
+  // and two of them running at once would both see _micProducer as null and both
+  // produce(), leaving a second, orphaned producer sending the same audio.
   async setLocalMediaStream(stream) {
+    this._publishing = (this._publishing || Promise.resolve())
+      .catch(() => {})
+      .then(() => this._setLocalMediaStream(stream));
+    return this._publishing;
+  }
+
+  async _setLocalMediaStream(stream) {
     if (!this._sendTransport) {
       console.error("Tried to setLocalMediaStream before a _sendTransport existed");
       return;
@@ -906,6 +931,20 @@ export class DialogAdapter extends EventEmitter {
   enableMicrophone(enabled) {
     if (!this._micProducer) {
       console.error("Tried to toggle mic but there's no producer.");
+      // vegamix: but remember what was asked for. A producer made later reads this to
+      // decide whether to start paused, so an unmute pressed while there was nothing
+      // to unmute is honoured once there is one.
+      this._micShouldBeEnabled = enabled;
+      // And try to be that moment. This branch means the producer was lost while the
+      // room stayed up, which used to leave the mute button doing nothing at all until
+      // the page was reloaded - the person presses it, sees the icon change, and is
+      // still heard by nobody. Publishing again is what the rejoin path does, and it
+      // is safe here: it only runs when there is a transport to publish onto.
+      if (enabled && this._sendTransport && this._localMediaStream) {
+        this.setLocalMediaStream(this._localMediaStream).catch(err => {
+          this.emitRTCEvent("error", "RTC", () => `Could not republish the mic: ${err}`);
+        });
+      }
       return;
     }
 

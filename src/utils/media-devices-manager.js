@@ -24,6 +24,16 @@ const detectedOS = detectOS(navigator.userAgent);
 const browser = detect();
 const audioInputSelectEnabled = !(["iOS", "Mac OS"].includes(detectedOS) && ["safari", "ios"].includes(browser.name));
 
+// vegamix: the errors getUserMedia raises when the person said no, as opposed to
+// when the device is simply not available right now. Only these mean "denied" -
+// see _startMicShare.
+const MIC_DENIAL_ERRORS = ["NotAllowedError", "PermissionDeniedError", "SecurityError"];
+
+// How long to keep trying to reopen a microphone that went away, in ms between
+// attempts. Roughly a minute in total, which covers a short call taken in another
+// application - the usual reason it disappears.
+const MIC_RECOVERY_DELAYS_MS = [500, 1000, 2000, 4000, 8000, 15000, 30000];
+
 export default class MediaDevicesManager extends EventEmitter {
   constructor(scene, store, audioSystem) {
     super();
@@ -35,6 +45,8 @@ export default class MediaDevicesManager extends EventEmitter {
     this._outputDevices = [];
     this._deviceId = null;
     this._audioTrack = null;
+    this._lastMicError = null;
+    this._micRecoveryAttempt = 0;
     this.audioSystem = audioSystem;
     this._mediaStream = audioSystem.outboundStream;
     this._permissionsStatus = {
@@ -270,11 +282,19 @@ export default class MediaDevicesManager extends EventEmitter {
         status: PermissionStatus.GRANTED
       });
     } else {
-      this._permissionsStatus[MediaDevices.MICROPHONE] = PermissionStatus.DENIED;
+      // vegamix: a device that is busy is not a device that was refused. A microphone
+      // another application is holding comes back as NotReadableError, and calling that
+      // a denial latched the status here to DENIED, which makes selectedMicDeviceId
+      // report "no device" - so the list of microphones lost its selection and picking
+      // another one looked like it did nothing. Only a real refusal changes the status.
+      const denied = MIC_DENIAL_ERRORS.includes(this._lastMicError?.name);
+      const status = denied ? PermissionStatus.DENIED : this._permissionsStatus[MediaDevices.MICROPHONE];
+
+      this._permissionsStatus[MediaDevices.MICROPHONE] = status;
       this._scene.emit(MediaDevicesEvents.MIC_SHARE_ENDED);
       this.emit(MediaDevicesEvents.PERMISSIONS_STATUS_CHANGED, {
         mediaDevice: MediaDevices.MICROPHONE,
-        status: PermissionStatus.DENIED
+        status
       });
     }
 
@@ -295,9 +315,13 @@ export default class MediaDevicesManager extends EventEmitter {
       const newStream = await navigator.mediaDevices.getUserMedia(constraints);
       this.audioSystem.addStreamToOutboundAudio("microphone", newStream);
       this.audioTrack = newStream.getAudioTracks()[0];
+      this._lastMicError = null;
       this.audioTrack.addEventListener("ended", async () => {
         this._scene.emit(MediaDevicesEvents.MIC_SHARE_ENDED);
-        this.startMicShare({ unmute: this.isMicEnabled });
+        // vegamix: was a single attempt, which is the one thing that cannot work.
+        // The usual reason a microphone ends is that another application took it,
+        // and it is still holding it when we ask for it back.
+        this._recoverMicShare();
       });
 
       if (/Oculus/.test(navigator.userAgent)) {
@@ -325,9 +349,43 @@ export default class MediaDevicesManager extends EventEmitter {
     } catch (e) {
       // Error fetching audio track, most likely a permission denial.
       console.error("Error during getUserMedia: ", e);
+      this._lastMicError = e;
       this.audioTrack = null;
       return false;
     }
+  }
+
+  // vegamix: a microphone can go away without anyone touching Hubs - another
+  // application opens it, a headset is unplugged, the OS moves the default device.
+  // Asking for it back once fails while whatever took it still has it, and until
+  // this existed that was the end of the microphone until the page was reloaded.
+  // So keep asking for about a minute, which outlasts a short call taken elsewhere.
+  async _recoverMicShare() {
+    const attempt = ++this._micRecoveryAttempt;
+    // Whether the person was being heard before it went, so they are put back the
+    // way they were rather than silently unmuted.
+    const unmute = this.isMicEnabled;
+
+    for (const delay of MIC_RECOVERY_DELAYS_MS) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+
+      // A newer recovery, or the person picking a device by hand, wins.
+      if (attempt !== this._micRecoveryAttempt) return;
+      if (this.isMicShared) return;
+
+      if (await this.startMicShare({ unmute })) {
+        console.log("Microphone recovered");
+        return;
+      }
+
+      // A refusal will not turn into a yes by asking again.
+      if (MIC_DENIAL_ERRORS.includes(this._lastMicError?.name)) {
+        console.warn("Giving up on the microphone: access was denied");
+        return;
+      }
+    }
+
+    console.warn("Could not reopen the microphone; it is still held by something else");
   }
 
   async stopMicShare() {
