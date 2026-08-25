@@ -963,6 +963,13 @@ export class DialogAdapter extends EventEmitter {
     return this._micProducer && !this._micProducer.paused;
   }
 
+  // vegamix: what the person last asked for, as opposed to what is actually happening.
+  // The two disagreeing - wants to be heard, is not being sent - is the signature of a
+  // producer lost with its transport, which is what the mic watchdog looks for.
+  get micShouldBeEnabled() {
+    return this._micShouldBeEnabled;
+  }
+
   cleanUpLocalState() {
     this._sendTransport && this._sendTransport.close();
     this._sendTransport = null;

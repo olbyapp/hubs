@@ -34,6 +34,20 @@ const MIC_DENIAL_ERRORS = ["NotAllowedError", "PermissionDeniedError", "Security
 // application - the usual reason it disappears.
 const MIC_RECOVERY_DELAYS_MS = [500, 1000, 2000, 4000, 8000, 15000, 30000];
 
+// How often to look at whether the microphone is still working. Reading a few
+// properties, so it can be often enough that nobody gets to finish a sentence into
+// a dead microphone.
+const MIC_HEALTH_CHECK_MS = 5000;
+
+// A track reports muted for a moment when the operating system takes the device
+// briefly - a notification sound on some drivers is enough. Only a mute that
+// outlasts this is treated as a microphone that stopped delivering.
+const MIC_MUTED_GRACE_MS = 15000;
+
+// How often the watchdog may try to publish a microphone that is alive but reaching
+// nobody. Slower than the check itself: republishing is cheap only when it works.
+const MIC_REPUBLISH_INTERVAL_MS = 15000;
+
 export default class MediaDevicesManager extends EventEmitter {
   constructor(scene, store, audioSystem) {
     super();
@@ -46,7 +60,13 @@ export default class MediaDevicesManager extends EventEmitter {
     this._deviceId = null;
     this._audioTrack = null;
     this._lastMicError = null;
-    this._micRecoveryAttempt = 0;
+    // Whether a microphone is meant to be open at all. Set by a share that worked,
+    // cleared by one the person ended, so the watchdog below never reopens a device
+    // for someone who deliberately closed it.
+    this._micShareWanted = false;
+    this._micRecoveryInFlight = false;
+    this._micMutedSince = null;
+    this._lastRepublishAt = 0;
     this.audioSystem = audioSystem;
     this._mediaStream = audioSystem.outboundStream;
     this._permissionsStatus = {
@@ -60,6 +80,17 @@ export default class MediaDevicesManager extends EventEmitter {
     navigator.mediaDevices.addEventListener("devicechange", this.onDeviceChange);
     this.onPermissionsUpdated = this.onPermissionsUpdated.bind(this);
     APP.hubChannel.addEventListener("permissions_updated", this.onPermissionsUpdated);
+
+    // vegamix: a microphone that stops working announces it to nobody. The person
+    // keeps talking, the level bar sits still, and the first sign is somebody saying
+    // they cannot hear you - by which point the sentence is gone. So look.
+    setInterval(() => this._checkMicHealth(), MIC_HEALTH_CHECK_MS);
+    // Two moments worth checking at once rather than waiting for the next tick: a
+    // device appearing or disappearing, and coming back to the tab. Both are when a
+    // microphone typically returns after whatever borrowed it is finished.
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) this._checkMicHealth();
+    });
   }
 
   static get isAudioOutputSelectEnabled() {
@@ -183,6 +214,9 @@ export default class MediaDevicesManager extends EventEmitter {
     this.fetchMediaDevices().then(() => {
       this.changeAudioOutput(this.selectedSpeakersDeviceId);
       this.emit(MediaDevicesEvents.DEVICE_CHANGE, null);
+      // A device list that just changed is the most likely moment for a microphone to
+      // have come back, so do not wait for the next tick of the watchdog.
+      this._checkMicHealth();
     });
   };
 
@@ -275,6 +309,8 @@ export default class MediaDevicesManager extends EventEmitter {
     }
 
     if (result) {
+      // From here on there is a microphone worth keeping alive - see _checkMicHealth.
+      this._micShareWanted = true;
       this._permissionsStatus[MediaDevices.MICROPHONE] = PermissionStatus.GRANTED;
       this._scene.emit(MediaDevicesEvents.MIC_SHARE_STARTED);
       this.emit(MediaDevicesEvents.PERMISSIONS_STATUS_CHANGED, {
@@ -361,34 +397,91 @@ export default class MediaDevicesManager extends EventEmitter {
   // this existed that was the end of the microphone until the page was reloaded.
   // So keep asking for about a minute, which outlasts a short call taken elsewhere.
   async _recoverMicShare() {
-    const attempt = ++this._micRecoveryAttempt;
-    // Whether the person was being heard before it went, so they are put back the
-    // way they were rather than silently unmuted.
-    const unmute = this.isMicEnabled;
+    // One at a time. The watchdog can call this every few seconds, and restarting the
+    // backoff on each call would turn a patient retry into a hammering.
+    if (this._micRecoveryInFlight) return;
+    this._micRecoveryInFlight = true;
 
-    for (const delay of MIC_RECOVERY_DELAYS_MS) {
-      await new Promise(resolve => setTimeout(resolve, delay));
+    // Whether the person was being heard before it went, so they are put back the way
+    // they were rather than silently unmuted. isMicEnabled alone would be wrong here:
+    // it reads the producer, and the producer is often exactly what was lost, which
+    // would bring the microphone back muted for someone who never muted it.
+    const unmute = this.isMicEnabled || !!APP.dialog?.micShouldBeEnabled;
 
-      // A newer recovery, or the person picking a device by hand, wins.
-      if (attempt !== this._micRecoveryAttempt) return;
-      if (this.isMicShared) return;
+    try {
+      for (const delay of MIC_RECOVERY_DELAYS_MS) {
+        await new Promise(resolve => setTimeout(resolve, delay));
 
-      if (await this.startMicShare({ unmute })) {
-        console.log("Microphone recovered");
-        return;
+        // The person picking a device by hand, or pressing unmute, got there first.
+        if (this.isMicShared) return;
+
+        if (await this.startMicShare({ unmute })) {
+          this._micMutedSince = null;
+          console.log("Microphone recovered");
+          return;
+        }
+
+        // A refusal will not turn into a yes by asking again.
+        if (MIC_DENIAL_ERRORS.includes(this._lastMicError?.name)) {
+          console.warn("Giving up on the microphone: access was denied");
+          return;
+        }
       }
 
-      // A refusal will not turn into a yes by asking again.
-      if (MIC_DENIAL_ERRORS.includes(this._lastMicError?.name)) {
-        console.warn("Giving up on the microphone: access was denied");
-        return;
-      }
+      console.warn("Could not reopen the microphone; it is still held by something else");
+    } finally {
+      this._micRecoveryInFlight = false;
+    }
+  }
+
+  // vegamix: the health check behind the watchdog. Two different things can be wrong
+  // and they need different repairs: the microphone itself can be gone, or it can be
+  // perfectly alive while nothing is carrying it to anyone.
+  _checkMicHealth() {
+    // Nobody asked for a microphone, or one is already being fetched.
+    if (!this._micShareWanted || this._micRecoveryInFlight) return;
+
+    const track = this.audioTrack;
+
+    if (!track || track.readyState !== "live") {
+      console.warn("Microphone is gone; trying to open it again");
+      this._recoverMicShare();
+      return;
     }
 
-    console.warn("Could not reopen the microphone; it is still held by something else");
+    // A live track that reports muted is the device saying it is not delivering -
+    // unplugged, taken by the system, put to sleep. It does not end, so nothing else
+    // notices. Brief mutes are normal, a lasting one is not.
+    if (track.muted) {
+      this._micMutedSince = this._micMutedSince || performance.now();
+      if (performance.now() - this._micMutedSince > MIC_MUTED_GRACE_MS) {
+        console.warn("Microphone has been delivering nothing; trying to open it again");
+        this._micMutedSince = null;
+        this._recoverMicShare();
+      }
+      return;
+    }
+    this._micMutedSince = null;
+
+    // The microphone is fine. Is anyone receiving it? A producer can be lost with its
+    // transport while the device itself never notices, which is the shape of failure
+    // where the level bar moves and yet nobody hears a thing.
+    if (APP.dialog?.micShouldBeEnabled && !APP.dialog.isMicEnabled) {
+      // Paced, because if publishing cannot succeed - no transport to publish onto,
+      // say - this would otherwise retry and complain every few seconds forever.
+      const now = performance.now();
+      if (!this._lastRepublishAt || now - this._lastRepublishAt > MIC_REPUBLISH_INTERVAL_MS) {
+        this._lastRepublishAt = now;
+        console.warn("Microphone is live but not being sent; publishing it again");
+        APP.dialog.enableMicrophone(true);
+      }
+    }
   }
 
   async stopMicShare() {
+    // Deliberate: the watchdog must not undo it.
+    this._micShareWanted = false;
+    this._micMutedSince = null;
     this.audioSystem.removeStreamFromOutboundAudio("microphone");
 
     this.audioTrack?.stop();
