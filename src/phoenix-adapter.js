@@ -1,5 +1,6 @@
 import { transportForChannel } from "./transport-for-channel";
 import { authorizeOrSanitizeMessage } from "./utils/permissions-utils";
+import { drainLegacyNafMessages, releaseLegacyNafDrain } from "./utils/listen-for-network-messages";
 
 // TODO: Use the websocket connection, not HEAD requests
 const getTimeOffsetToServer = async () => {
@@ -94,6 +95,11 @@ export default class PhoenixAdapter {
       "hub:leave",
       this.events.on(`hub:leave`, ({ key }) => this.nafOccupantLeave(key))
     );
+
+    // First syncs that arrived while the page was still loading — before the handlers
+    // above existed — were stashed by listen-for-network-messages. No await between the
+    // channel.on calls and this line, so nothing is ever delivered twice.
+    drainLegacyNafMessages(this);
   }
   shouldStartConnectionTo() {}
   startStreamConnection() {}
@@ -122,6 +128,9 @@ export default class PhoenixAdapter {
   }
 
   disconnect() {
+    // The channel handlers below are going away, so the early-bound listener must go
+    // back to stashing until the next adapter (re-entry, hub switch) drains it.
+    releaseLegacyNafDrain();
     this.hubChannel.presence.list(key => key).forEach(this.nafOccupantLeave);
     this.hubChannel.channel.off("naf", this.refs.get("naf"));
     this.hubChannel.channel.off("nafr", this.refs.get("nafr"));
