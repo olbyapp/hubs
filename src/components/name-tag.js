@@ -8,8 +8,9 @@ import { createPlaneBufferGeometry, setMatrixWorld } from "../utils/three-utils"
 import { textureLoader } from "../utils/media-utils";
 
 import handRaisedIconSrc from "../assets/hud/hand-raised.png";
-import { STATUS_LABELS, STATUS_COLORS } from "../utils/user-status";
+import { STATUS_COLORS, statusLabelFor } from "../utils/user-status";
 import {
+  createStatusTextTexture,
   getAchievementIconsTexture,
   getAwayIconTexture,
   getPrivateZoneIconTexture,
@@ -37,6 +38,23 @@ const NAMETAG_AWAY_ICON_SCALE = 0.55;
 // row of glyphs under it does too; a Cyrillic award name at this size did not,
 // and it collided with the name above it.
 const ACHIEVEMENT_ICON_HEIGHT = 0.115;
+
+// A custom status takes the same row as a fixed one, but is painted from a
+// canvas rather than set as MSDF text, so its size is given here instead of in
+// hub.html. Chosen to put the letters at about the 0.065 the MSDF status line
+// uses, allowing for the ascender and descender room the canvas box reserves.
+const CUSTOM_STATUS_TEXT_HEIGHT = 0.075;
+// A custom status may run to a hundred characters. The plate is exactly as wide
+// as the widest thing on it, and a hundred characters of plate floating over
+// somebody's head would blot out the room, so the tag shows an opening and the
+// People panel carries the whole of it.
+const NAMETAG_STATUS_TEXT_LENGTH = 28;
+
+function truncateStatusText(text) {
+  const characters = Array.from(text);
+  if (characters.length <= NAMETAG_STATUS_TEXT_LENGTH) return text;
+  return `${characters.slice(0, NAMETAG_STATUS_TEXT_LENGTH).join("")}…`;
+}
 
 // The plate grows a line at a time. Three rows (name, awards, status) need
 // more room than the two the pronouns line ever asked for, so each layout is
@@ -87,6 +105,12 @@ AFRAME.registerComponent("name-tag", {
     this.achievementCount = 0;
     this.identityName = null;
     this.status = "none";
+    // The words behind status "custom". Named apart from this.statusText, which
+    // is the MSDF object3D that draws the fixed statuses.
+    this.customStatus = "";
+    this.customStatusWidth = 0;
+    this.customStatusTexture = null;
+    this.prevCustomStatus = "";
     this.isInPrivateZone = false;
     this.isTalking = false;
     this.isTyping = false;
@@ -137,6 +161,17 @@ AFRAME.registerComponent("name-tag", {
     );
     this.achievementLabel.visible = false;
     this.el.object3D.add(this.achievementLabel);
+
+    // The custom-status line, sharing the status row with the MSDF one — only
+    // ever one of the two is visible. Same reason as the awards above it: the
+    // nametag font is MSDF, and a status somebody typed will have Cyrillic or
+    // an emoji in it sooner rather than later.
+    this.customStatusLabel = new THREE.Mesh(
+      statusIconGeometry,
+      new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false })
+    );
+    this.customStatusLabel.visible = false;
+    this.el.object3D.add(this.customStatusLabel);
 
     this.handRaised = new THREE.Mesh(handRaisedGeometry, handRaisedMaterial);
     this.handRaised.position.set(0, -0.3, 0.001);
@@ -217,6 +252,8 @@ AFRAME.registerComponent("name-tag", {
 
   remove() {
     if (DEBUG) this.el.sceneEl.object3D.remove(this.avatarAABBHelper);
+    // Painted for this tag alone and shared with nothing, so it goes with it.
+    if (this.customStatusTexture) this.customStatusTexture.dispose();
   },
 
   tick: (() => {
@@ -338,6 +375,7 @@ AFRAME.registerComponent("name-tag", {
     // Everyone carries a status now, including those who never opened the
     // picker, so the plate always has a label and an icon.
     this.status = presenceMeta.profile.status || "none";
+    this.customStatus = presenceMeta.profile.statusText || "";
     this.isPageHidden = !!presenceMeta.profile.hidden;
     this.isRecording = !!(presenceMeta.streaming || presenceMeta.recording);
     this.isOwner = !!(presenceMeta.roles && presenceMeta.roles.owner);
@@ -352,7 +390,13 @@ AFRAME.registerComponent("name-tag", {
     this.statusText.el.components["text"].getSize(this.size);
     const statusTextSize = this.size.x || 0;
     this.nametagText.el.components["text"].getSize(this.size);
-    this.size.x = Math.max(this.size.x, this.achievementWidth, statusTextSize, NAMETAG_MIN_WIDTH);
+    this.size.x = Math.max(
+      this.size.x,
+      this.achievementWidth,
+      statusTextSize,
+      this.customStatusWidth,
+      NAMETAG_MIN_WIDTH
+    );
     this.resizeNameTag();
   },
 
@@ -381,8 +425,23 @@ AFRAME.registerComponent("name-tag", {
     this.nametagText.matrixNeedsUpdate = true;
   },
 
+  // A custom status with nothing readable behind it is not a status: no line,
+  // no badge. setOwnStatus refuses to publish one, but the text arrives over
+  // presence and any client can put anything in a profile.
+  statusIconTexture() {
+    if (this.status === "custom" && !this.statusLabel()) return null;
+    return getStatusIconTexture(this.status);
+  },
+
+  statusLabel() {
+    return statusLabelFor(this.status, this.customStatus);
+  },
+
   updateStatus() {
-    const label = (this.status && STATUS_LABELS[this.status]) || "";
+    // The two lines share the row and take it in turns: MSDF for the fixed
+    // statuses it can spell, canvas for the one it cannot.
+    const isCustom = this.status === "custom";
+    const label = isCustom ? "" : this.statusLabel();
     if (label !== this.prevStatusLabel) {
       this.statusText.el.addEventListener("text-updated", () => this.updateNametagWidth(), {
         once: true
@@ -396,7 +455,29 @@ AFRAME.registerComponent("name-tag", {
     this.statusText.position.set(this.textOffsetX, this.statusRowY, 0.001);
     this.statusText.matrixNeedsUpdate = true;
 
-    const texture = getStatusIconTexture(this.status);
+    const custom = isCustom ? truncateStatusText(this.statusLabel()) : "";
+    if (custom !== this.prevCustomStatus) {
+      // Each tag owns its texture rather than sharing a cached one, so the old
+      // one has nobody else drawing with it once it is replaced.
+      if (this.customStatusTexture) this.customStatusTexture.dispose();
+      const painted = createStatusTextTexture(custom, STATUS_COLORS.custom);
+      this.customStatusTexture = painted && painted.texture;
+      this.customStatusLabel.visible = !!painted;
+      this.customStatusWidth = painted ? CUSTOM_STATUS_TEXT_HEIGHT * painted.aspect : 0;
+      if (painted) {
+        this.customStatusLabel.material.map = painted.texture;
+        this.customStatusLabel.material.needsUpdate = true;
+        this.customStatusLabel.scale.set(this.customStatusWidth, CUSTOM_STATUS_TEXT_HEIGHT, 1);
+      }
+      this.prevCustomStatus = custom;
+      // Measured as it is painted, so unlike the MSDF line beside it there is
+      // no text-updated event to wait for before the plate can be sized to fit.
+      this.updateNametagWidth();
+    }
+    this.customStatusLabel.position.set(this.textOffsetX, this.statusRowY, 0.001);
+    this.customStatusLabel.matrixNeedsUpdate = true;
+
+    const texture = this.statusIconTexture();
     this.statusIcon.visible = !!texture;
     if (texture) {
       this.statusIcon.material.map = texture;
@@ -451,7 +532,7 @@ AFRAME.registerComponent("name-tag", {
     // Awards and status each take a row of their own when both are present,
     // which is what used to leave them sitting on top of the name.
     const hasAwards = achievementEmoji(this.achievement).length > 0;
-    const hasStatus = !!(this.status && STATUS_LABELS[this.status]);
+    const hasStatus = !!this.statusLabel();
     const layout = NAMETAG_LAYOUTS[(hasAwards ? 1 : 0) + (hasStatus ? 1 : 0)];
     this.nameTagHeight = layout.height;
     this.nameTagOffset = layout.offset;
@@ -475,7 +556,13 @@ AFRAME.registerComponent("name-tag", {
     this.statusText.el && this.statusText.el.components["text"].getSize(this.size);
     const statusTextSize = this.size.x;
     this.nametagText.el.components["text"].getSize(this.size);
-    this.size.x = Math.max(this.size.x, this.achievementWidth, statusTextSize, NAMETAG_MIN_WIDTH);
+    this.size.x = Math.max(
+      this.size.x,
+      this.achievementWidth,
+      statusTextSize,
+      this.customStatusWidth,
+      NAMETAG_MIN_WIDTH
+    );
     this.nametagVolume.position.set(0, this.nameTagVolumeY, 0.001);
     this.nametagVolume.matrixNeedsUpdate = true;
     this.nametagTyping.position.set(0, this.nameTagVolumeY, 0.001);
@@ -510,7 +597,7 @@ AFRAME.registerComponent("name-tag", {
   // re-run the hand-raised animation with it.
   applyIconLayout() {
     const iconSize = this.nameTagHeight - NAMETAG_STATUS_ICON_PADDING * 2;
-    this.statusIconSize = getStatusIconTexture(this.status) ? iconSize : 0;
+    this.statusIconSize = this.statusIconTexture() ? iconSize : 0;
     this.privateZoneIconSize = this.isInPrivateZone ? iconSize : 0;
     // Deliberately smaller than the badges on the right, and in front of the name
     // rather than beside them: it is a footnote about where somebody is looking, not

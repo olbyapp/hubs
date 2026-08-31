@@ -11,7 +11,8 @@ export const STATUS_GLYPHS = {
   work: "💼",
   eat: "🍔",
   thinking: "💭",
-  afk: "💤"
+  afk: "💤",
+  custom: "💬"
 };
 
 // Same treatment for "this person is in a private zone".
@@ -101,6 +102,49 @@ export function getAwayIconTexture() {
   texture.needsUpdate = true;
   awayIconTexture = { texture, aspect: width / height };
   return awayIconTexture;
+}
+
+// A custom status is free text, and the nametag's font is MSDF — no Cyrillic,
+// no emoji, nothing beyond the ASCII the fixed statuses were written in. So
+// that line is painted into a canvas too.
+//
+// Unlike the icons around it this is not cached and not shared: every custom
+// status is a different string, so a shared cache would either grow with every
+// edit anyone makes or evict a texture some nametag is still drawing with. The
+// caller owns what it gets back and disposes the previous one — each nametag
+// then holds exactly one, however often its owner rewrites it.
+//
+// The box is fixed rather than measured, which is the other difference. Scaling
+// each string's real bounding box to one world height would size the letters by
+// whether the text happens to contain a descender: "работаю" would come out
+// visibly smaller than "ЖДУ".
+const STATUS_TEXT_PIXELS = 64;
+const STATUS_TEXT_FONT = `600 ${STATUS_TEXT_PIXELS}px sans-serif`;
+const STATUS_TEXT_ASCENT = Math.round(STATUS_TEXT_PIXELS * 0.92);
+const STATUS_TEXT_DESCENT = Math.round(STATUS_TEXT_PIXELS * 0.24);
+
+// Returns { texture, aspect }, or null when there is nothing to draw.
+export function createStatusTextTexture(text, color) {
+  if (!text) return null;
+
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  context.font = STATUS_TEXT_FONT;
+  const width = Math.max(1, Math.ceil(context.measureText(text).width));
+  const height = STATUS_TEXT_ASCENT + STATUS_TEXT_DESCENT;
+
+  canvas.width = width;
+  canvas.height = height;
+  // Resizing a canvas resets every property of its context, the font included.
+  context.font = STATUS_TEXT_FONT;
+  context.fillStyle = color || "#ffffff";
+  context.textAlign = "left";
+  context.textBaseline = "alphabetic";
+  context.fillText(text, 0, STATUS_TEXT_ASCENT);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return { texture, aspect: width / height };
 }
 
 // Award icons for the name tag: the emoji a person holds, side by side, with

@@ -81,6 +81,14 @@ function statusFor(presences, sessionId) {
   return (profile && profile.status) || "none";
 }
 
+// Carried alongside the status because for a custom one the text is the status:
+// two people can both be "custom" and be saying entirely different things, and
+// the tile diff below has to be able to tell them apart.
+function statusTextFor(presences, sessionId) {
+  const profile = getPresenceProfileForSession(presences, sessionId);
+  return (profile && profile.statusText) || "";
+}
+
 // Everyone within earshot gets a tile, camera or no camera: the panel is the
 // list of people you are talking to, and someone with their camera off is still
 // one of them — their tile just carries their name instead of a picture.
@@ -100,6 +108,7 @@ export function collectVideoTiles(presences, mySessionId) {
       track: localTrack,
       micMuted: !(APP.mediaDevicesManager && APP.mediaDevicesManager.isMicEnabled),
       status: statusFor(presences, mySessionId),
+      statusText: statusTextFor(presences, mySessionId),
       privateZone: isSessionInPrivateZone(mySessionId)
     });
   }
@@ -125,6 +134,7 @@ export function collectVideoTiles(presences, mySessionId) {
       track: remoteTracks.get(sessionId) || null,
       micMuted: !!playerInfo.data.muted,
       status: statusFor(presences, sessionId),
+      statusText: statusTextFor(presences, sessionId),
       privateZone: isSessionInPrivateZone(sessionId)
     });
   }
@@ -142,6 +152,7 @@ export function sameTiles(a, b) {
       a[i].isScreen !== b[i].isScreen ||
       a[i].micMuted !== b[i].micMuted ||
       a[i].status !== b[i].status ||
+      a[i].statusText !== b[i].statusText ||
       a[i].privateZone !== b[i].privateZone
     ) {
       return false;

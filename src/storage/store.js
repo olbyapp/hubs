@@ -85,7 +85,16 @@ export const SCHEMA = {
         // profiles carry an empty string, which the pattern refused, so every
         // update logged an error and dropped the field all over again.
         pronouns: { type: "string" },
-        status: { type: "string", enum: ["none", "work", "eat", "thinking", "afk"] },
+        // Keep this list in step with USER_STATUSES in utils/user-status.js —
+        // a status missing from the enum is not rejected loudly, it is quietly
+        // deleted from the profile on the next write.
+        status: { type: "string", enum: ["none", "work", "eat", "thinking", "afk", "custom"] },
+        // The words behind status: "custom". Kept when another status is picked
+        // so the dialog can offer back what was typed last time; readers ignore
+        // it unless the status is actually custom. Length is capped in code
+        // rather than here: the store's response to an invalid value is to drop
+        // the property, which for a string maxLength does not even work.
+        statusText: { type: "string" },
         // Whether this person's tab is backgrounded. Lives on the profile, not
         // because it is part of an identity, but because profile changes are the
         // one thing hub-channel re-broadcasts to everyone with no server work.

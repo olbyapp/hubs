@@ -22,18 +22,31 @@ import { ReactComponent as CallIcon } from "../icons/Call.svg";
 import { List, ButtonListItem } from "../layout/List";
 import { FormattedMessage, defineMessage, useIntl } from "react-intl";
 import { PermissionNotification } from "./PermissionNotifications";
-import { STATUS_DISPLAY_NAMES, STATUS_COLORS } from "../../utils/user-status";
+import { STATUS_DISPLAY_NAMES, STATUS_COLORS, sanitizeStatusText } from "../../utils/user-status";
 import { ACHIEVEMENTS, achievementKeys } from "../../utils/achievements";
 
-function StatusLabel({ status }) {
+// The panel is the one place a custom status is shown whole — the nametag has
+// only the width of somebody's head to work with and cuts it short — so the row
+// gives it as much of the line as the name is prepared to yield, and the rest
+// is in the tooltip.
+function StatusLabel({ status, statusText }) {
   const s = status && STATUS_DISPLAY_NAMES[status] ? status : "none";
+  const custom = s === "custom" ? sanitizeStatusText(statusText) : "";
+  const label = custom || STATUS_DISPLAY_NAMES[s];
   return (
-    <span style={{ color: STATUS_COLORS[s], fontWeight: 600, whiteSpace: "nowrap" }}>{STATUS_DISPLAY_NAMES[s]}</span>
+    <span
+      className={classNames(styles.statusLabel, { [styles.customStatusLabel]: !!custom })}
+      style={{ color: STATUS_COLORS[s] }}
+      title={custom || undefined}
+    >
+      {label}
+    </span>
   );
 }
 
 StatusLabel.propTypes = {
-  status: PropTypes.string
+  status: PropTypes.string,
+  statusText: PropTypes.string
 };
 
 const toolTipDescription = defineMessage({
@@ -244,7 +257,10 @@ export function PeopleSidebar({
                 )}
                 <p className={styles.personName}>{getPersonName(person, intl)}</p>
                 <AchievementBadges person={person} />
-                <StatusLabel status={person.profile && person.profile.status} />
+                <StatusLabel
+                  status={person.profile && person.profile.status}
+                  statusText={person.profile && person.profile.statusText}
+                />
                 {person.roles.owner && (
                   <StarIcon
                     title={intl.formatMessage({ id: "people-sidebar.moderator-label", defaultMessage: "Moderator" })}

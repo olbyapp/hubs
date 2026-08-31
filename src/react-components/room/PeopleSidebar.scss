@@ -22,6 +22,24 @@
   white-space: nowrap;
 }
 
+:local(.status-label) {
+  flex: 0 0 auto;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+// A custom status is free text and can be a hundred characters long, so unlike
+// the one-word fixed ones it has to be allowed to give way — it shrinks with an
+// ellipsis rather than pushing the presence and the row's buttons off the end.
+// The whole line is in the tooltip.
+:local(.custom-status-label) {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+
 :local(.achievements) {
   flex: 0 0 auto;
   display: flex;

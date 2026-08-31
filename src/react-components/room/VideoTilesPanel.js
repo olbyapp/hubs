@@ -9,7 +9,7 @@ import { collectTalkingSessions, collectVideoTiles, sameSessions, sameTiles } fr
 import { useTopDownActive } from "./useTopDownActive";
 import { ReactComponent as MicrophoneIcon } from "../icons/Microphone.svg";
 import { ReactComponent as MicrophoneMutedIcon } from "../icons/MicrophoneMuted.svg";
-import { STATUS_COLORS, STATUS_DISPLAY_NAMES } from "../../utils/user-status";
+import { sanitizeStatusText, STATUS_COLORS, STATUS_DISPLAY_NAMES } from "../../utils/user-status";
 import { PRIVATE_ZONE_GLYPH, STATUS_GLYPHS } from "../../utils/status-icons";
 import { isPrivateZoneActive, onPrivateZoneChanged, PRIVATE_ZONE_COLOR } from "../../utils/private-zone";
 
@@ -53,6 +53,8 @@ const tileShape = PropTypes.shape({
   track: PropTypes.object,
   micMuted: PropTypes.bool,
   status: PropTypes.string,
+  // Only meaningful when status is "custom" — then it is the status.
+  statusText: PropTypes.string,
   privateZone: PropTypes.bool
 });
 
@@ -62,8 +64,12 @@ const tileShape = PropTypes.shape({
 // that corner. Sized by the caller from the tile's own width, so they grow with
 // it: fixed pixels left them as specks once a tile filled the middle of the
 // screen.
-function TileBadges({ micMuted, status, privateZone, size }) {
+function TileBadges({ micMuted, status, statusText, privateZone, size }) {
   const known = status && STATUS_GLYPHS[status] ? status : "none";
+  // In the 2D view a tile is often all you see of somebody, so the badge is
+  // where their custom status has to be readable — the glyph alone says only
+  // "they wrote something".
+  const custom = known === "custom" ? sanitizeStatusText(statusText) : "";
   const MicIcon = micMuted ? MicrophoneMutedIcon : MicrophoneIcon;
   const box = size ? { width: size, height: size } : undefined;
   const glyphBox = size ? { width: size, height: size, fontSize: Math.round(size * 0.62) } : undefined;
@@ -75,7 +81,7 @@ function TileBadges({ micMuted, status, privateZone, size }) {
       <span
         className={styles.glyphBadge}
         style={{ ...glyphBox, backgroundColor: STATUS_COLORS[known] }}
-        title={STATUS_DISPLAY_NAMES[known]}
+        title={custom || STATUS_DISPLAY_NAMES[known]}
       >
         {STATUS_GLYPHS[known]}
       </span>
@@ -95,6 +101,7 @@ function TileBadges({ micMuted, status, privateZone, size }) {
 TileBadges.propTypes = {
   micMuted: PropTypes.bool,
   status: PropTypes.string,
+  statusText: PropTypes.string,
   privateZone: PropTypes.bool,
   size: PropTypes.number
 };
@@ -182,7 +189,13 @@ function VideoTile({ tile, size, style, talking, onClick, onToggleFullscreen, fu
         </div>
       )}
       <span className={styles.badges} style={badgesStyle}>
-        <TileBadges micMuted={tile.micMuted} status={tile.status} privateZone={tile.privateZone} size={badgeSize} />
+        <TileBadges
+          micMuted={tile.micMuted}
+          status={tile.status}
+          statusText={tile.statusText}
+          privateZone={tile.privateZone}
+          size={badgeSize}
+        />
         {/* Repeating the name under a placeholder would only crowd it out. */}
         {tile.track && (
           <span className={styles.label} style={{ fontSize: labelFontSize }}>

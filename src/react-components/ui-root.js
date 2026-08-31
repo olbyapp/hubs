@@ -1711,7 +1711,7 @@ class UIRoot extends Component {
                             initialPresence={getPresenceProfileForSession(this.props.presences, this.props.sessionId)}
                           />
                         )}
-                        <StatusPopoverContainer />
+                        <StatusPopoverContainer showNonHistoriedDialog={this.showNonHistoriedDialog} />
                         <PrivateZoneToggleButton />
                         <TopDownToggleButton scene={this.props.scene} />
                         <DialogerRecButton scene={this.props.scene} />
