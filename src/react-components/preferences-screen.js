@@ -498,10 +498,6 @@ const preferenceLabels = defineMessages({
     id: "preferences-screen.preference.allow-multiple-hubs-instances",
     defaultMessage: "Disable auto-exit when multiple hubs instances are open"
   },
-  disableIdleDetection: {
-    id: "preferences-screen.preference.disable-idle-detection",
-    defaultMessage: "Disable auto-exit when idle or backgrounded"
-  },
   preferMobileObjectInfoPanel: {
     id: "preferences-screen.preference.prefer-mobile-object-info-panel",
     defaultMessage: "Prefer Mobile Object Info Panel"
@@ -1301,10 +1297,6 @@ class PreferencesScreen extends Component {
           this.state.preferredCamera,
           {
             key: "allowMultipleHubsInstances",
-            prefType: PREFERENCE_LIST_ITEM_TYPE.CHECK_BOX
-          },
-          {
-            key: "disableIdleDetection",
             prefType: PREFERENCE_LIST_ITEM_TYPE.CHECK_BOX
           },
           {

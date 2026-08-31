@@ -306,12 +306,11 @@ class UIRoot extends Component {
   };
 
   onIdleDetected = () => {
-    if (
-      this.props.disableAutoExitOnIdle ||
-      this.state.isStreaming ||
-      this.props.store.state.preferences.disableIdleDetection
-    )
-      return;
+    // Office policy, not a personal preference: the five-hour idle exit is what
+    // keeps frozen avatars out of the room and out of the statistics, so the
+    // "disable idle detection" checkbox no longer bypasses it (it is gone from
+    // the preferences screen; ?allow_idle stays as the developer escape).
+    if (this.props.disableAutoExitOnIdle || this.state.isStreaming) return;
     this.startAutoExitTimer(AutoExitReason.idle);
   };
 

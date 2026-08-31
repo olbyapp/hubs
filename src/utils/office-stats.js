@@ -88,6 +88,13 @@ function userKey() {
 const pending = { talk_ms: 0, walk_mm: 0, afk_ms: 0, thinking_ms: 0, eat_ms: 0 };
 const listeners = new Set();
 
+// When the idle-detector last saw this person do anything (input or voice).
+// Rides on every post as idleMs, so hub-stats can hold a quiet stretch aside
+// and credit it only if the person wakes up; a stretch that instead ends in
+// the five-hour idle exit is never counted — no presence, no journal end
+// time, no achievements.
+let lastActivityAt = Date.now();
+
 let started = false;
 let sessionId = null;
 let seq = 0;
@@ -195,6 +202,7 @@ function payload() {
     displayName: (window.APP.store.state.profile && window.APP.store.state.profile.displayName) || "",
     seq: seq + 1,
     spanMs,
+    idleMs: Math.max(0, Date.now() - lastActivityAt),
     deltas: { ...pending }
   };
 }
@@ -302,6 +310,9 @@ export function startOfficeStats() {
   postDueAt = Date.now() + 5000;
 
   setInterval(sample, SAMPLE_MS);
+  window.addEventListener("activity_detected", () => {
+    lastActivityAt = Date.now();
+  });
   window.addEventListener("pagehide", flushOnExit);
   // pagehide does not fire on every mobile browser; visibilitychange does.
   document.addEventListener("visibilitychange", () => {
