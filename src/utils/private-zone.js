@@ -21,8 +21,10 @@
 // microphone, which the people beside you still need.
 
 // Metres. Deliberately far below the ~8 m at which someone counts as a
-// neighbour for the tiles panel, so the difference is unmistakable.
-export const PRIVATE_ZONE_RADIUS = 3;
+// neighbour for the tiles panel, so the difference is unmistakable. Narrowed by
+// a fifth from the 3 m it opened with: at that size it kept reaching past the
+// people it was meant to hold and pulling in whoever walked by.
+export const PRIVATE_ZONE_RADIUS = 2.4;
 
 // Used for the ear badge wherever it appears — the corner indicator, the tiles
 // and the in-world name tags — so all of them read as one signal.
