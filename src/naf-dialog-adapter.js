@@ -3,6 +3,7 @@ import protooClient from "protoo-client";
 import { debug as newDebug } from "debug";
 import EventEmitter from "eventemitter3";
 import { MediaDevices } from "./utils/media-devices-utils";
+import { recordRtcEvent } from "./utils/rtc-telemetry";
 
 // Used for VP9 webcam video.
 //const VIDEO_KSVC_ENCODINGS = [{ scalabilityMode: "S3T3_KEY" }];
@@ -60,6 +61,28 @@ function encodingsFor(mediasoupDevice, encodings) {
   return rewritesSdpForSimulcast ? encodings.slice(-1) : encodings;
 }
 
+// vegamix: how patiently the signalling socket is re-dialed before the person is
+// shown the exit screen. Upstream reconnects only by moving to another server,
+// which a single-host deployment does not have - see _retryConnectWithNewHost.
+const RECONNECT_DELAYS_MS = [2000, 4000, 8000, 15000, 30000];
+
+// vegamix: the transport watchdog. How often both transports are looked at, how
+// long "disconnected" may last before it is treated as dead rather than as a
+// blip (browsers may sit in it forever without ever reaching "failed", and only
+// "failed" has an event handler), and how many silent samples convict a mic.
+const TRANSPORT_WATCHDOG_MS = 10000;
+const STUCK_DISCONNECTED_MS = 15000;
+const DEAD_MIC_SAMPLES = 2;
+
+// vegamix: rebuilding the receive transport re-announces every producer, which
+// is the only safe re-sync the server offers - refreshConsumers on a live
+// transport duplicates every consumer, the server keeps no per-peer dedup. A
+// rebuild interrupts everything this person hears for a moment, so it is
+// debounced and paced.
+const RECV_RESYNC_DEBOUNCE_MS = 3000;
+const RECV_RESYNC_MIN_INTERVAL_MS = 60000;
+const CONSUMER_MISSING_TICKS = 2;
+
 export const DIALOG_CONNECTION_CONNECTED = "dialog-connection-connected";
 export const DIALOG_CONNECTION_ERROR_FATAL = "dialog-connection-error-fatal";
 
@@ -82,6 +105,23 @@ export class DialogAdapter extends EventEmitter {
     this.scene = null;
     this._serverParams = {};
     this._consumerStats = {};
+
+    // vegamix: reconnect and watchdog state. _disposed marks a deliberate leave,
+    // so a retry that wakes from its backoff knows not to re-dial a room the
+    // person already left.
+    this._reconnectAttempt = 0;
+    this._disposed = false;
+    this._sendRecreateInProgress = false;
+    this._recvRecreateInProgress = false;
+    this._recvResyncTimer = null;
+    this._lastRecvResyncAt = 0;
+    this._watchdogTimer = null;
+    this._badStateSince = { send: null, recv: null };
+    this._micBytesSent = null;
+    this._micDeadSamples = 0;
+    // peerId -> { misses, rebuilds }: how long somebody present has had no audio
+    // reaching us, and how often that was already answered with a rebuild.
+    this._peerAudioWatch = new Map();
   }
 
   get consumerStats() {
@@ -180,6 +220,18 @@ export class DialogAdapter extends EventEmitter {
   }
 
   async recreateSendTransport(iceServers) {
+    // vegamix: same one-at-a-time rule as the receive side - the ICE-failed
+    // handler and the mic-flow watchdog can both get here.
+    if (this._sendRecreateInProgress) return;
+    this._sendRecreateInProgress = true;
+    try {
+      await this._recreateSendTransport(iceServers);
+    } finally {
+      this._sendRecreateInProgress = false;
+    }
+  }
+
+  async _recreateSendTransport(iceServers) {
     this.emitRTCEvent("log", "RTC", () => `Recreating send transport ICE`);
     await this.closeSendTransport();
     await this.createSendTransport(iceServers);
@@ -234,10 +286,19 @@ export class DialogAdapter extends EventEmitter {
   }
 
   async recreateRecvTransport(iceServers) {
-    this.emitRTCEvent("log", "RTC", () => `Recreating receive transport ICE`);
-    await this.closeRecvTransport();
-    await this.createRecvTransport(iceServers);
-    await this._protoo.request("refreshConsumers");
+    // vegamix: one at a time - the ICE-failed path, the resync path and the
+    // watchdog can all decide to rebuild, and two rebuilds interleaved would
+    // close each other's transports.
+    if (this._recvRecreateInProgress) return;
+    this._recvRecreateInProgress = true;
+    try {
+      this.emitRTCEvent("log", "RTC", () => `Recreating receive transport ICE`);
+      await this.closeRecvTransport();
+      await this.createRecvTransport(iceServers);
+      await this._protoo.request("refreshConsumers");
+    } finally {
+      this._recvRecreateInProgress = false;
+    }
   }
 
   /**
@@ -276,6 +337,8 @@ export class DialogAdapter extends EventEmitter {
   }
 
   async connect({ serverUrl, roomId, serverParams, scene, clientId, forceTcp, forceTurn, iceTransportPolicy }) {
+    this._disposed = false;
+    this._startWatchdog();
     this._serverUrl = serverUrl;
     this._roomId = roomId;
     this._serverParams = serverParams;
@@ -361,6 +424,12 @@ export class DialogAdapter extends EventEmitter {
             this.emitRTCEvent("error", "Adapter", () => `Error: ${err}`);
             error('"newConsumer" request failed:%o', err);
 
+            // vegamix: rejecting is right - the server must not resume a
+            // consumer this side failed to build - but it used to be the end of
+            // the story: nobody ever announced that producer to us again, and
+            // the person behind it stayed silent until a page reload. Rebuild
+            // the receive side, which re-announces every producer that exists.
+            this._scheduleRecvResync("newConsumer failed");
             throw err;
           }
 
@@ -458,6 +527,9 @@ export class DialogAdapter extends EventEmitter {
     return new Promise((resolve, reject) => {
       this._protoo.on("open", async () => {
         this.emitRTCEvent("info", "Signaling", () => `Open`);
+        // vegamix: a socket that opened proves the host is reachable; the retry
+        // ladder starts from the top next time.
+        this._reconnectAttempt = 0;
 
         try {
           await this._joinRoom();
@@ -475,15 +547,42 @@ export class DialogAdapter extends EventEmitter {
   async _retryConnectWithNewHost() {
     this.cleanUpLocalState();
     this._protoo.removeAllListeners();
-    const serverParams = await APP.hubChannel.getHost();
+
+    // vegamix: written upstream for a fleet, running here on a single host.
+    // Upstream's notion of reconnecting is moving to whichever server reticulum
+    // now names; when it names the same one - which on one host it always does -
+    // this used to declare failure without having re-dialed even once, so any
+    // socket drop that outlived protoo's three tries became the exit screen.
+    // A blip deserves patience: re-dial the same host on a backoff and only
+    // give up once the ladder is spent.
+    let serverParams;
+    try {
+      serverParams = await APP.hubChannel.getHost();
+    } catch (err) {
+      // The phoenix channel is down too, so the network itself is out. The
+      // params in hand are as good as any while it comes back.
+      this.emitRTCEvent("warn", "Signaling", () => `getHost failed (${err}), re-dialing the known host`);
+      serverParams = this._serverParams;
+    }
     const { host, port } = serverParams;
     const newServerUrl = `wss://${host}:${port}`;
     if (this._serverUrl === newServerUrl) {
-      console.error("Reconnect to dialog failed.");
-      this.emit(DIALOG_CONNECTION_ERROR_FATAL);
-      return;
+      const attempt = this._reconnectAttempt;
+      if (attempt >= RECONNECT_DELAYS_MS.length) {
+        console.error("Reconnect to dialog failed.");
+        this.emit(DIALOG_CONNECTION_ERROR_FATAL);
+        return;
+      }
+      this._reconnectAttempt += 1;
+      const delay = RECONNECT_DELAYS_MS[attempt];
+      this.emitRTCEvent("warn", "Signaling", () => `Re-dialing the same host in ${delay}ms (attempt ${attempt + 1})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      // The person may have left the room while this slept.
+      if (this._disposed) return;
+    } else {
+      this._reconnectAttempt = 0;
+      console.log(`The Dialog server has changed to ${newServerUrl}, reconnecting with the new server...`);
     }
-    console.log(`The Dialog server has changed to ${newServerUrl}, reconnecting with the new server...`);
     await this.connect({
       serverUrl: newServerUrl,
       roomId: this._roomId,
@@ -980,8 +1079,186 @@ export class DialogAdapter extends EventEmitter {
     this._cameraProducer = null;
   }
 
+  // ---------------------------------------------------------------------------
+  // vegamix: the transport watchdog. Three failure shapes reach it, all found in
+  // the wild on this deployment and none covered by an event:
+  //
+  //  - a transport that sits in "disconnected" forever: only "failed" has a
+  //    handler, and browsers are not obliged to ever get there;
+  //  - a mic producer that is live and unmuted on a "connected" transport yet
+  //    moves no bytes - the DTLS-died-one-way shape, "I hear everyone, nobody
+  //    hears me";
+  //  - a person present in the room with no audio consumer for them - a lost
+  //    newConsumer, "everyone hears them except me".
+  //
+  // Each repair is the same one the respective event handler would have run,
+  // just decided by looking instead of waiting to be told.
+
+  _startWatchdog() {
+    if (this._watchdogTimer) return;
+    this._watchdogTimer = setInterval(() => this._watchdogTick(), TRANSPORT_WATCHDOG_MS);
+  }
+
+  _stopWatchdog() {
+    if (!this._watchdogTimer) return;
+    clearInterval(this._watchdogTimer);
+    this._watchdogTimer = null;
+  }
+
+  async _watchdogTick() {
+    if (this._disposed || !this._protoo || !this._protoo.connected) return;
+    try {
+      this._checkStuckTransport("send", this._sendTransport, () => this.restartSendICE());
+      this._checkStuckTransport("recv", this._recvTransport, () => this.restartRecvICE());
+      this._checkMissingConsumers();
+      await this._checkMicFlow();
+    } catch (err) {
+      this.emitRTCEvent("error", "RTC", () => `Watchdog tick failed: ${err}`);
+    }
+  }
+
+  _checkStuckTransport(name, transport, restart) {
+    const state = transport && transport.connectionState;
+    if (state === "disconnected") {
+      if (!this._badStateSince[name]) {
+        this._badStateSince[name] = Date.now();
+      } else if (Date.now() - this._badStateSince[name] > STUCK_DISCONNECTED_MS) {
+        this._badStateSince[name] = null;
+        this.emitRTCEvent("warn", "RTC", () => `${name} transport stuck in disconnected, restarting ICE`);
+        restart();
+      }
+    } else {
+      this._badStateSince[name] = null;
+    }
+  }
+
+  // Zero RTP is legal for a paused producer (zeroRtpOnPause) and for a transport
+  // still connecting; only an unmuted microphone on a transport that calls
+  // itself connected is obliged to move bytes. Opus DTX thins silence out but
+  // never to nothing for twenty seconds. Two flat samples convict.
+  async _checkMicFlow() {
+    const producer = this._micProducer;
+    if (
+      !producer ||
+      producer.paused ||
+      producer.closed ||
+      !this._sendTransport ||
+      this._sendTransport.connectionState !== "connected"
+    ) {
+      this._micBytesSent = null;
+      this._micDeadSamples = 0;
+      return;
+    }
+
+    let bytesSent = null;
+    try {
+      const stats = await producer.getStats();
+      stats.forEach(report => {
+        if (report.type === "outbound-rtp") bytesSent = report.bytesSent;
+      });
+    } catch {
+      return; // The producer closed mid-await; the next tick sees the truth.
+    }
+    if (bytesSent === null) return;
+
+    if (this._micBytesSent !== null && bytesSent <= this._micBytesSent) {
+      this._micDeadSamples += 1;
+      if (this._micDeadSamples >= DEAD_MIC_SAMPLES) {
+        this._micDeadSamples = 0;
+        this._micBytesSent = null;
+        this.emitRTCEvent(
+          "warn",
+          "RTC",
+          () =>
+            `Mic producer moved no bytes for ${(DEAD_MIC_SAMPLES * TRANSPORT_WATCHDOG_MS) / 1000}s, rebuilding the send transport`
+        );
+        try {
+          const { host, port, turn } = this._serverParams;
+          await this.recreateSendTransport(this.getIceServers(host, port, turn));
+        } catch (err) {
+          this.emitRTCEvent("error", "RTC", () => `Send rebuild failed: ${err}`);
+        }
+      }
+      return;
+    }
+    this._micDeadSamples = 0;
+    this._micBytesSent = bytesSent;
+  }
+
+  // Somebody who is in the room (not the lobby) and has had no audio reaching us
+  // for two ticks either never granted a microphone - a rebuild will not conjure
+  // a producer, so after two answered rebuilds per person the blame stops being
+  // placed here - or their newConsumer was lost on the way, which a rebuild
+  // fixes. Presence is the same roster the People list shows.
+  _checkMissingConsumers() {
+    let state;
+    try {
+      state = APP.hubChannel.presence.state;
+    } catch {
+      return;
+    }
+    if (!state) return;
+
+    const haveAudio = new Set();
+    this._consumers.forEach(consumer => {
+      if (!consumer.closed && consumer.track && consumer.track.kind === "audio") {
+        haveAudio.add(consumer.appData.peerId);
+      }
+    });
+
+    const missing = [];
+    for (const id of Object.keys(state)) {
+      if (id === this._clientId) continue;
+      const meta = state[id].metas && state[id].metas[0];
+      if (!meta || meta.presence !== "room") continue;
+      if (haveAudio.has(id)) {
+        this._peerAudioWatch.delete(id);
+        continue;
+      }
+      const entry = this._peerAudioWatch.get(id) || { misses: 0, rebuilds: 0 };
+      entry.misses += 1;
+      this._peerAudioWatch.set(id, entry);
+      if (entry.misses >= CONSUMER_MISSING_TICKS && entry.rebuilds < 2) {
+        entry.rebuilds += 1;
+        missing.push(id);
+      }
+    }
+
+    // Forget the departed, or the map grows for the length of the workday.
+    for (const id of this._peerAudioWatch.keys()) {
+      if (!state[id]) this._peerAudioWatch.delete(id);
+    }
+
+    if (missing.length === 0) return;
+    this.emitRTCEvent("warn", "RTC", () => `No audio consumer for present peers: ${missing.join(", ")}`);
+    this._scheduleRecvResync(`missing audio from ${missing.length} peer(s)`);
+  }
+
+  _scheduleRecvResync(reason) {
+    if (this._recvResyncTimer || this._recvRecreateInProgress) return;
+    if (Date.now() - this._lastRecvResyncAt < RECV_RESYNC_MIN_INTERVAL_MS) return;
+    this._recvResyncTimer = setTimeout(async () => {
+      this._recvResyncTimer = null;
+      if (this._disposed || !this._protoo?.connected || this._recvRecreateInProgress) return;
+      this._lastRecvResyncAt = Date.now();
+      this.emitRTCEvent("warn", "RTC", () => `Rebuilding the receive transport: ${reason}`);
+      try {
+        const { host, port, turn } = this._serverParams;
+        await this.recreateRecvTransport(this.getIceServers(host, port, turn));
+      } catch (err) {
+        this.emitRTCEvent("error", "RTC", () => `Receive rebuild failed: ${err}`);
+      }
+    }, RECV_RESYNC_DEBOUNCE_MS);
+  }
+
   disconnect() {
     debug("disconnect()");
+    this._disposed = true;
+    this._stopWatchdog();
+    if (this._recvResyncTimer) {
+      clearTimeout(this._recvResyncTimer);
+      this._recvResyncTimer = null;
+    }
     this.cleanUpLocalState();
     if (this._protoo) {
       this._protoo.removeAllListeners();
@@ -1019,6 +1296,11 @@ export class DialogAdapter extends EventEmitter {
   }
 
   emitRTCEvent(level, tag, msgFunc) {
+    const msg = msgFunc();
+    // vegamix: the debug panel used to be the only reader, so with it closed
+    // every one of these lines was thrown away - including the ones that say
+    // exactly why somebody stopped being heard. Telemetry listens always.
+    recordRtcEvent(level, tag, msg);
     if (!window.APP.store.state.preferences.showRtcDebugPanel) return;
     const time = new Date().toLocaleTimeString("en-US", {
       hour12: false,
@@ -1026,6 +1308,6 @@ export class DialogAdapter extends EventEmitter {
       minute: "numeric",
       second: "numeric"
     });
-    this.scene.emit("rtc_event", { level, tag, time, msg: msgFunc() });
+    this.scene.emit("rtc_event", { level, tag, time, msg });
   }
 }
