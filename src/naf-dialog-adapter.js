@@ -122,6 +122,10 @@ export class DialogAdapter extends EventEmitter {
     // peerId -> { misses, rebuilds }: how long somebody present has had no audio
     // reaching us, and how often that was already answered with a rebuild.
     this._peerAudioWatch = new Map();
+    // Peers whose audio has actually arrived at some point. Someone who never
+    // published a microphone is quiet by choice, not by fault - telling the two
+    // apart is what keeps the watchdog from rebuilding transports for nothing.
+    this._everHadAudio = new Set();
   }
 
   get consumerStats() {
@@ -216,6 +220,15 @@ export class DialogAdapter extends EventEmitter {
       () => `Restarting ${transport.id === this._sendTransport.id ? "send" : "receive"} transport ICE`
     );
     const iceParameters = await this._protoo.request("restartIce", { transportId: transport.id });
+    // vegamix: this request can outlive its transport. Seen in the wild: both
+    // transports failed, the signalling socket dropped with the restartIce
+    // requests still in flight, the reconnect rebuilt everything, and only then
+    // did the old requests come back (as a timeout, 22 seconds later). Restarting
+    // ICE on a transport that has since been replaced would break a working one.
+    if (transport.closed || (transport !== this._sendTransport && transport !== this._recvTransport)) {
+      this.emitRTCEvent("info", "RTC", () => `Dropping a stale ICE restart for ${transport.id}`);
+      return;
+    }
     await transport.restartIce({ iceParameters });
   }
 
@@ -396,9 +409,17 @@ export class DialogAdapter extends EventEmitter {
 
             // Store in the map.
             this._consumers.set(consumer.id, consumer);
+            // vegamix: proof that this peer does have a microphone and that it
+            // reaches us. The watchdog only chases audio that was once here and
+            // went missing - see _checkMissingConsumers.
+            if (kind === "audio") this._everHadAudio.add(peerId);
 
             consumer.on("transportclose", () => {
-              this.emitRTCEvent("error", "RTC", () => `Consumer transport closed`);
+              // vegamix: info, not error. Every consumer fires this when the
+              // transport goes, so one failure used to print seventeen error
+              // lines and drown the log; the transport's own state change is
+              // where the actual failure is reported.
+              this.emitRTCEvent("info", "RTC", () => `Consumer transport closed`);
               this.removeConsumer(consumer.id);
             });
 
@@ -462,6 +483,11 @@ export class DialogAdapter extends EventEmitter {
             break;
           }
 
+          // vegamix: the server closing a consumer is deliberate - the producer
+          // behind it went away, which is what stopping a mic share looks like.
+          // Forget that this peer ever had audio, or the watchdog would spend
+          // the rest of the session trying to win it back.
+          this._everHadAudio.delete(consumer.appData.peerId);
           consumer.close();
           this.removeConsumer(consumer.id);
 
@@ -1185,11 +1211,19 @@ export class DialogAdapter extends EventEmitter {
     this._micBytesSent = bytesSent;
   }
 
-  // Somebody who is in the room (not the lobby) and has had no audio reaching us
-  // for two ticks either never granted a microphone - a rebuild will not conjure
-  // a producer, so after two answered rebuilds per person the blame stops being
-  // placed here - or their newConsumer was lost on the way, which a rebuild
-  // fixes. Presence is the same roster the People list shows.
+  // vegamix: "everyone hears them except me" - audio that was reaching us and
+  // stopped, while the person is still in the room and the server never said it
+  // had closed their producer.
+  //
+  // The first version of this asked a looser question - present in the room and
+  // no audio consumer - and the first day of telemetry showed why that is wrong.
+  // Two people were flagged from four independent sessions, all day, including
+  // by a listener whose page had just loaded; a fresh join is served every
+  // existing producer up front, so there was no lost announcement to recover.
+  // They simply had no microphone, and each false positive spent a receive
+  // transport rebuild, which costs everyone else a second or two of silence.
+  // Never-had-audio is now diagnosed, not repaired: only a peer in
+  // _everHadAudio can be missing something.
   _checkMissingConsumers() {
     let state;
     try {
@@ -1206,7 +1240,8 @@ export class DialogAdapter extends EventEmitter {
       }
     });
 
-    const missing = [];
+    const lost = [];
+    const silent = [];
     for (const id of Object.keys(state)) {
       if (id === this._clientId) continue;
       const meta = state[id].metas && state[id].metas[0];
@@ -1215,28 +1250,42 @@ export class DialogAdapter extends EventEmitter {
         this._peerAudioWatch.delete(id);
         continue;
       }
+      if (!this._everHadAudio.has(id)) {
+        silent.push(id);
+        continue;
+      }
       const entry = this._peerAudioWatch.get(id) || { misses: 0, rebuilds: 0 };
       entry.misses += 1;
       this._peerAudioWatch.set(id, entry);
-      if (entry.misses >= CONSUMER_MISSING_TICKS && entry.rebuilds < 2) {
-        entry.rebuilds += 1;
-        missing.push(id);
-      }
+      if (entry.misses >= CONSUMER_MISSING_TICKS && entry.rebuilds < 2) lost.push(id);
     }
 
-    // Forget the departed, or the map grows for the length of the workday.
+    // Forget the departed, or the maps grow for the length of the workday.
     for (const id of this._peerAudioWatch.keys()) {
       if (!state[id]) this._peerAudioWatch.delete(id);
     }
+    for (const id of this._everHadAudio) {
+      if (!state[id]) this._everHadAudio.delete(id);
+    }
 
-    if (missing.length === 0) return;
-    this.emitRTCEvent("warn", "RTC", () => `No audio consumer for present peers: ${missing.join(", ")}`);
-    this._scheduleRecvResync(`missing audio from ${missing.length} peer(s)`);
+    // Not a fault, but the answer to "why is it quiet in here" - and the number
+    // the snapshot's audioConsumers/peersInRoom gap is made of.
+    if (silent.length) {
+      this.emitRTCEvent("info", "RTC", () => `Present with no microphone: ${silent.join(", ")}`);
+    }
+
+    if (lost.length === 0) return;
+    this.emitRTCEvent("warn", "RTC", () => `Audio was reaching us and stopped: ${lost.join(", ")}`);
+    // Only spend a peer's rebuild budget if a rebuild was really scheduled;
+    // pacing can drop this on the floor, and a skipped attempt must not count.
+    if (this._scheduleRecvResync(`lost audio from ${lost.length} peer(s)`)) {
+      for (const id of lost) this._peerAudioWatch.get(id).rebuilds += 1;
+    }
   }
 
   _scheduleRecvResync(reason) {
-    if (this._recvResyncTimer || this._recvRecreateInProgress) return;
-    if (Date.now() - this._lastRecvResyncAt < RECV_RESYNC_MIN_INTERVAL_MS) return;
+    if (this._recvResyncTimer || this._recvRecreateInProgress) return false;
+    if (Date.now() - this._lastRecvResyncAt < RECV_RESYNC_MIN_INTERVAL_MS) return false;
     this._recvResyncTimer = setTimeout(async () => {
       this._recvResyncTimer = null;
       if (this._disposed || !this._protoo?.connected || this._recvRecreateInProgress) return;
@@ -1249,6 +1298,7 @@ export class DialogAdapter extends EventEmitter {
         this.emitRTCEvent("error", "RTC", () => `Receive rebuild failed: ${err}`);
       }
     }, RECV_RESYNC_DEBOUNCE_MS);
+    return true;
   }
 
   disconnect() {
