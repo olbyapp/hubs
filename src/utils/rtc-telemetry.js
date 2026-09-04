@@ -121,6 +121,11 @@ function payload(events) {
   const context = {
     v: 1,
     sessionId,
+    // Which build is speaking. Without it, telling an old tab from a fresh one
+    // means inferring it from side effects - on 2026-09-04 that meant reading
+    // the log level of an unrelated line, a signal that vanishes as soon as
+    // everyone reloads.
+    build: process.env.BUILD_VERSION || "?",
     ts: Date.now(),
     roomId: (window.APP && window.APP.hub && window.APP.hub.hub_id) || null,
     peerId: (window.APP && window.APP.dialog && window.APP.dialog._clientId) || null,

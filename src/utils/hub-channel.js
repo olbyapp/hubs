@@ -4,6 +4,11 @@ import { Presence } from "phoenix";
 import { migrateChannelToSocket, discordBridgesForPresences, migrateToChannel } from "./phoenix-utils";
 import configs from "./configs";
 
+// vegamix: shorter than phoenix's own default. The caller is a voice reconnect
+// with a person sitting in silence, and it has a working fallback - waiting
+// longer buys nothing but a longer silence.
+const GET_HOST_TIMEOUT_MS = 5000;
+
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const MS_PER_MONTH = 1000 * 60 * 60 * 24 * 30;
 
@@ -370,14 +375,24 @@ export default class HubChannel extends EventTarget {
     });
   };
 
+  // vegamix: "timeout" is not optional here. A phoenix push settles as "ok" or
+  // "error" only while the socket can carry it; when the network goes away the
+  // push is buffered and neither hook ever runs. This promise then never
+  // settles - and the one caller is the dialog adapter's reconnect, whose very
+  // first act is to await it. Seen in the wild 2026-09-04: transports, dialog
+  // signalling and phoenix all died together at 02:01, the reconnect awaited a
+  // host that never came, and the tab sat silent for the next four and a half
+  // hours - no audio, no error screen, no retry. Rejecting instead lets the
+  // caller fall back to the host it already knows.
   getHost = () => {
     return new Promise((resolve, reject) => {
       this.channel
-        .push("get_host")
+        .push("get_host", {}, GET_HOST_TIMEOUT_MS)
         .receive("ok", res => {
           resolve(res);
         })
-        .receive("error", reject);
+        .receive("error", reject)
+        .receive("timeout", () => reject(new Error("get_host timed out")));
     });
   };
 

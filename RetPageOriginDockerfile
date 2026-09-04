@@ -19,7 +19,15 @@ copy admin/package-lock.json admin/
 run cd admin && npm ci --legacy-peer-deps && cd ..
 copy . .
 env BASE_ASSETS_PATH="{{rawhubs-base-assets-path}}"
-run npm run build 
+# vegamix: webpack already threads BUILD_VERSION through to the client, but
+# nothing ever set it, so every build called itself "?". Telemetry needs to say
+# which build reported a problem - without it, reading a log means guessing the
+# version from side effects. Placed after the npm ci layers so a new value does
+# not invalidate the dependency cache. Pass it as:
+#   docker build --build-arg BUILD_VERSION=$(git rev-parse --short HEAD) ...
+arg BUILD_VERSION=dev
+env BUILD_VERSION=$BUILD_VERSION
+run npm run build
 run cd admin && npm run build && cp -R dist/* ../dist && cd ..
 run mkdir -p dist/pages && mv dist/*.html dist/pages && mv dist/hub.service.js dist/pages && mv dist/schema.toml dist/pages          
 run mkdir /hubs/rawhubs && mv dist/pages /hubs/rawhubs && mv dist/assets /hubs/rawhubs && mv dist/favicon.ico /hubs/rawhubs/pages
