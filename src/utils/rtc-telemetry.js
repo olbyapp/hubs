@@ -37,6 +37,16 @@ function randomId() {
 
 const sessionId = randomId().replace(/-/g, "").slice(0, 32);
 
+// Read at post time rather than once at startup: people rename themselves, and
+// the profile is not loaded yet when the first events are recorded.
+function name() {
+  try {
+    return (window.APP.store.state.profile || {}).displayName || null;
+  } catch {
+    return null;
+  }
+}
+
 let buffer = [];
 let dropped = 0;
 let lastEvent = null;
@@ -126,6 +136,12 @@ function payload(events) {
     // the log level of an unrelated line, a signal that vanishes as soon as
     // everyone reloads.
     build: process.env.BUILD_VERSION || "?",
+    // Who this is. Tying a session to a person used to mean matching its start
+    // time against the visit journal by hand - about five minutes of archaeology
+    // per question, and only possible at all because people join at distinct
+    // moments. The office already shows these names to each other and the
+    // journal already stores them.
+    name: name(),
     ts: Date.now(),
     roomId: (window.APP && window.APP.hub && window.APP.hub.hub_id) || null,
     peerId: (window.APP && window.APP.dialog && window.APP.dialog._clientId) || null,

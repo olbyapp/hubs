@@ -74,6 +74,14 @@ const TRANSPORT_WATCHDOG_MS = 10000;
 const STUCK_DISCONNECTED_MS = 15000;
 const DEAD_MIC_SAMPLES = 2;
 
+// vegamix: how many ticks running an unmuted person's audio consumer may bring
+// no bytes before it is called dead. Three (thirty seconds) rather than the
+// mic's two, because the repair is a receive-transport rebuild that interrupts
+// everyone this person hears - a false positive is expensive. Opus DTX thins
+// silence out but keeps sending comfort noise every few hundred milliseconds,
+// so a genuinely quiet speaker still moves the counter.
+const SILENT_CONSUMER_SAMPLES = 3;
+
 // vegamix: rebuilding the receive transport re-announces every producer, which
 // is the only safe re-sync the server offers - refreshConsumers on a live
 // transport duplicates every consumer, the server keeps no per-peer dedup. A
@@ -119,6 +127,15 @@ export class DialogAdapter extends EventEmitter {
     this._badStateSince = { send: null, recv: null };
     this._micBytesSent = null;
     this._micDeadSamples = 0;
+    // consumerId -> { bytes, dead }: the byte counter last seen on an audio
+    // consumer, and how many ticks running it has not moved.
+    this._consumerBytes = new Map();
+    // consumerIds whose remote producer is muted. Kept from the newConsumer
+    // handshake and the consumerPaused/Resumed notifications.
+    this._producerPaused = new Set();
+    // peerId -> rebuilds already spent on their audio going silent. Separate
+    // from _peerAudioWatch on purpose; see _checkSilentConsumers.
+    this._silentPeerRebuilds = new Map();
     // peerId -> { misses, rebuilds }: how long somebody present has had no audio
     // reaching us, and how often that was already answered with a rebuild.
     this._peerAudioWatch = new Map();
@@ -307,6 +324,9 @@ export class DialogAdapter extends EventEmitter {
     try {
       this.emitRTCEvent("log", "RTC", () => `Recreating receive transport ICE`);
       await this.closeRecvTransport();
+      // Every consumer is about to be replaced; their byte counters mean
+      // nothing against the new ones.
+      this._consumerBytes.clear();
       await this.createRecvTransport(iceServers);
       await this._protoo.request("refreshConsumers");
     } finally {
@@ -395,8 +415,7 @@ export class DialogAdapter extends EventEmitter {
 
       switch (request.method) {
         case "newConsumer": {
-          const { peerId, producerId, id, kind, rtpParameters, /*type, */ appData /*, producerPaused */ } =
-            request.data;
+          const { peerId, producerId, id, kind, rtpParameters, /*type, */ appData, producerPaused } = request.data;
 
           try {
             const consumer = await this._recvTransport.consume({
@@ -409,6 +428,15 @@ export class DialogAdapter extends EventEmitter {
 
             // Store in the map.
             this._consumers.set(consumer.id, consumer);
+            // vegamix: whether the person on the other end is muted. A muted
+            // producer sends nothing at all (zeroRtpOnPause), so without this
+            // the silent-consumer watchdog would convict most of the room -
+            // people are muted about eighty per cent of the time.
+            if (producerPaused) {
+              this._producerPaused.add(consumer.id);
+            } else {
+              this._producerPaused.delete(consumer.id);
+            }
             // vegamix: proof that this peer does have a microphone and that it
             // reaches us. The watchdog only chases audio that was once here and
             // went missing - see _checkMissingConsumers.
@@ -510,6 +538,25 @@ export class DialogAdapter extends EventEmitter {
 
         case "downlinkBwe": {
           this._downlinkBwe = notification.data;
+          break;
+        }
+
+        // vegamix: the server has always sent these two (Room.js emits them on
+        // the producer's pause/resume) and the client has always ignored them.
+        // The silent-consumer watchdog needs them: they are the difference
+        // between "this person muted themselves" and "this person's audio
+        // stopped reaching me".
+        case "consumerPaused": {
+          this._producerPaused.add(notification.data.consumerId);
+          this._consumerBytes.delete(notification.data.consumerId);
+          break;
+        }
+
+        case "consumerResumed": {
+          this._producerPaused.delete(notification.data.consumerId);
+          // Start counting from whatever arrives next, not from the frozen
+          // total the mute left behind.
+          this._consumerBytes.delete(notification.data.consumerId);
           break;
         }
 
@@ -657,6 +704,8 @@ export class DialogAdapter extends EventEmitter {
   removeConsumer(consumerId) {
     this.emitRTCEvent("info", "RTC", () => `Consumer removed: ${consumerId}`);
     this._consumers.delete(consumerId);
+    this._producerPaused.delete(consumerId);
+    this._consumerBytes.delete(consumerId);
   }
 
   getMediaStream(clientId, kind = "audio") {
@@ -1138,6 +1187,7 @@ export class DialogAdapter extends EventEmitter {
       this._checkStuckTransport("recv", this._recvTransport, () => this.restartRecvICE());
       this._checkMissingConsumers();
       await this._checkMicFlow();
+      await this._checkSilentConsumers();
     } catch (err) {
       this.emitRTCEvent("error", "RTC", () => `Watchdog tick failed: ${err}`);
     }
@@ -1281,6 +1331,80 @@ export class DialogAdapter extends EventEmitter {
     if (this._scheduleRecvResync(`lost audio from ${lost.length} peer(s)`)) {
       for (const id of lost) this._peerAudioWatch.get(id).rebuilds += 1;
     }
+  }
+
+  // vegamix: the gap the Iri incident exposed. Every other check here asks
+  // whether a consumer *exists*; none asked whether it *delivers*. A consumer
+  // left over from a transport blip is a live object that no packets reach, and
+  // to a check that counts objects it looks exactly like a working one - so the
+  // watchdog stayed silent through eighty minutes of a person hearing less than
+  // the room did. Bytes are the only honest answer.
+  async _checkSilentConsumers() {
+    if (this._recvRecreateInProgress || !this._recvTransport) return;
+    // Mid-rebuild or mid-reconnect the counters are meaningless.
+    if (this._recvTransport.connectionState !== "connected") {
+      this._consumerBytes.clear();
+      return;
+    }
+
+    const silent = [];
+    for (const consumer of this._consumers.values()) {
+      if (consumer.closed || consumer.paused) continue;
+      if (!consumer.track || consumer.track.kind !== "audio") continue;
+      // Muted people are supposed to send nothing.
+      if (this._producerPaused.has(consumer.id)) {
+        this._consumerBytes.delete(consumer.id);
+        continue;
+      }
+
+      let bytes = null;
+      try {
+        const stats = await consumer.getStats();
+        stats.forEach(report => {
+          if (report.type === "inbound-rtp") bytes = report.bytesReceived;
+        });
+      } catch {
+        continue; // Closed underneath us; the next tick sees the truth.
+      }
+      if (bytes === null) continue;
+
+      const seen = this._consumerBytes.get(consumer.id);
+      if (seen && bytes <= seen.bytes) {
+        seen.dead += 1;
+        if (seen.dead >= SILENT_CONSUMER_SAMPLES) {
+          silent.push(consumer.appData.peerId);
+          seen.dead = 0;
+        }
+      } else {
+        this._consumerBytes.set(consumer.id, { bytes, dead: 0 });
+        // Audio is arriving from this person, so whatever was spent on them
+        // earlier is forgiven: a second outage later deserves its own attempts.
+        this._silentPeerRebuilds.delete(consumer.appData.peerId);
+      }
+    }
+
+    if (silent.length === 0) return;
+    this.emitRTCEvent(
+      "warn",
+      "RTC",
+      () =>
+        `Audio consumer delivering nothing for ${(SILENT_CONSUMER_SAMPLES * TRANSPORT_WATCHDOG_MS) / 1000}s: ${silent.join(", ")}`
+    );
+
+    // Its own budget, deliberately not _peerAudioWatch: that map is cleared
+    // every tick for any peer who has a consumer at all, and a silent consumer
+    // is still a consumer - sharing it would have reset the cap on each pass
+    // and left nothing capped. Same reasoning as there, though: if rebuilding
+    // twice did not bring this person's audio back, the fault is not one a
+    // rebuild can reach, and further attempts only cost everyone else.
+    const worth = silent.filter(peerId => {
+      const used = this._silentPeerRebuilds.get(peerId) || 0;
+      if (used >= 2) return false;
+      this._silentPeerRebuilds.set(peerId, used + 1);
+      return true;
+    });
+    if (worth.length === 0) return;
+    this._scheduleRecvResync(`silent audio from ${worth.length} peer(s)`);
   }
 
   _scheduleRecvResync(reason) {
