@@ -136,6 +136,9 @@ export class DialogAdapter extends EventEmitter {
     // peerId -> rebuilds already spent on their audio going silent. Separate
     // from _peerAudioWatch on purpose; see _checkSilentConsumers.
     this._silentPeerRebuilds = new Map();
+    // The last set of microphone-less people reported, so the line is written
+    // when it changes rather than every ten seconds.
+    this._lastSilentKey = null;
     // peerId -> { misses, rebuilds }: how long somebody present has had no audio
     // reaching us, and how often that was already answered with a rebuild.
     this._peerAudioWatch = new Map();
@@ -1319,9 +1322,16 @@ export class DialogAdapter extends EventEmitter {
     }
 
     // Not a fault, but the answer to "why is it quiet in here" - and the number
-    // the snapshot's audioConsumers/peersInRoom gap is made of.
-    if (silent.length) {
-      this.emitRTCEvent("info", "RTC", () => `Present with no microphone: ${silent.join(", ")}`);
+    // the snapshot's audioConsumers/peersInRoom gap is made of. Logged only
+    // when the set changes: repeating it every tick put 645 identical lines
+    // into one day's telemetry, a tenth of the whole file, saying nothing the
+    // first one had not.
+    const silentKey = silent.join(",");
+    if (silentKey !== this._lastSilentKey) {
+      this._lastSilentKey = silentKey;
+      if (silent.length) {
+        this.emitRTCEvent("info", "RTC", () => `Present with no microphone: ${silent.join(", ")}`);
+      }
     }
 
     if (lost.length === 0) return;
@@ -1371,12 +1381,36 @@ export class DialogAdapter extends EventEmitter {
       const seen = this._consumerBytes.get(consumer.id);
       if (seen && bytes <= seen.bytes) {
         seen.dead += 1;
-        if (seen.dead >= SILENT_CONSUMER_SAMPLES) {
-          silent.push(consumer.appData.peerId);
+        // vegamix: only a consumer that was carrying audio and stopped is a
+        // fault. One that has never moved a byte is far more likely to be
+        // somebody who joined muted: mediasoup-client's ProducerOptions has no
+        // `pause` field, so the `pause: !micShouldBeEnabled` this code passes
+        // to produce() is dropped on the floor, and the server can believe a
+        // producer is live while its owner has never been heard. Convicting
+        // those costs everyone in the room a rebuild and repairs nothing.
+        // This is the same distinction the missing-consumer check already
+        // makes with _everHadAudio, and forgetting it here fired a rebuild on
+        // three quiet newcomers on 2026-09-07.
+        if (seen.delivered && seen.dead >= SILENT_CONSUMER_SAMPLES) {
+          silent.push({
+            peerId: consumer.appData.peerId,
+            // Carried into the log so the next incident can be judged without
+            // guessing: how long we have held this consumer, and how much it
+            // ever brought.
+            detail: `${consumer.appData.peerId} (held ${Math.round((Date.now() - seen.since) / 1000)}s, ${bytes}B)`
+          });
           seen.dead = 0;
         }
       } else {
-        this._consumerBytes.set(consumer.id, { bytes, dead: 0 });
+        const wasDelivering = seen ? seen.delivered : false;
+        this._consumerBytes.set(consumer.id, {
+          bytes,
+          dead: 0,
+          // The first reading is a baseline, not proof of delivery; only a
+          // later reading that is larger shows audio actually flowing.
+          delivered: wasDelivering || (!!seen && bytes > seen.bytes),
+          since: seen ? seen.since : Date.now()
+        });
         // Audio is arriving from this person, so whatever was spent on them
         // earlier is forgiven: a second outage later deserves its own attempts.
         this._silentPeerRebuilds.delete(consumer.appData.peerId);
@@ -1388,7 +1422,9 @@ export class DialogAdapter extends EventEmitter {
       "warn",
       "RTC",
       () =>
-        `Audio consumer delivering nothing for ${(SILENT_CONSUMER_SAMPLES * TRANSPORT_WATCHDOG_MS) / 1000}s: ${silent.join(", ")}`
+        `Audio stopped arriving for ${(SILENT_CONSUMER_SAMPLES * TRANSPORT_WATCHDOG_MS) / 1000}s from: ${silent
+          .map(s => s.detail)
+          .join(", ")}`
     );
 
     // Its own budget, deliberately not _peerAudioWatch: that map is cleared
@@ -1397,7 +1433,7 @@ export class DialogAdapter extends EventEmitter {
     // and left nothing capped. Same reasoning as there, though: if rebuilding
     // twice did not bring this person's audio back, the fault is not one a
     // rebuild can reach, and further attempts only cost everyone else.
-    const worth = silent.filter(peerId => {
+    const worth = silent.filter(({ peerId }) => {
       const used = this._silentPeerRebuilds.get(peerId) || 0;
       if (used >= 2) return false;
       this._silentPeerRebuilds.set(peerId, used + 1);
