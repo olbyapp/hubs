@@ -120,13 +120,19 @@ const updateBillboard = (
   // Set the camera world position as the target.
   targetPos.setFromMatrixPosition(camera.matrixWorld);
 
+  // Name tags build their own transform in top-down (orientation, scale and an
+  // offset off the head), so this system has to leave them alone there. The
+  // check sits before the onlyY branch because that branch never runs for them:
+  // `Billboard.onlyY` is only ever written by the new loader's inflator, and the
+  // tags come from hub.html, where the A-Frame `billboard` component has no
+  // schema and drops the `onlyY: true` it is given. They fall through to the
+  // lookAt below, which — running after the component ticks, since A-Frame ticks
+  // systems last — is what left every tag turned to face the camera instead of
+  // lying flat and readable.
+  if (topDown && object3D.userData.ownsTopDownOrientation) return;
+
   if (Billboard.onlyY[billboard]) {
     if (topDown) {
-      // Name tags build their own transform in top-down (orientation, scale and
-      // an offset off the head). Writing a rotation here too would fight them,
-      // and whichever ran last won — which is how tags ended up yawed with the
-      // avatar despite name-tag.js laying them flat.
-      if (object3D.userData.ownsTopDownOrientation) return;
       // Yaw-only billboards are seen edge-on from above; lay them flat instead.
       if (object3D.parent) {
         object3D.parent.updateMatrices();

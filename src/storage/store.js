@@ -136,6 +136,7 @@ export const SCHEMA = {
         hasRecentered: { type: "boolean" },
         hasScaled: { type: "boolean" },
         hasHoveredInWorldHud: { type: "boolean" },
+        hasDismissedTopDownHints: { type: "boolean" },
         hasOpenedShare: { type: "boolean" },
         entryCount: { type: "number" }
       }

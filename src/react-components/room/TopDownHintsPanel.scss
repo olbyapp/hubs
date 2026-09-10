@@ -1,0 +1,96 @@
+@use "../styles/theme.scss";
+
+// Bottom-right of the room view, the one corner the 2D view leaves empty: the
+// video tiles take the left edge, the menus the top. The doubled selector
+// outranks the viewport's `> *` rule, which sets pointer-events for everything
+// it holds — this card wants clicks on its two controls and nowhere else.
+:local(.panel):local(.panel) {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  max-width: 280px;
+  padding: 10px 12px;
+  border-radius: theme.$border-radius-regular;
+  border: 1px solid theme.$button-border-color;
+  background-color: theme.$button-bg-color;
+  color: theme.$text1-color;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+
+  @media (min-width: theme.$breakpoint-lg) {
+    right: 24px;
+    bottom: 24px;
+  }
+}
+
+:local(.header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+:local(.title) {
+  font-size: theme.$font-size-sm;
+  font-weight: theme.$font-weight-bold;
+}
+
+:local(.close) {
+  pointer-events: auto;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  color: theme.$text2-color;
+  font-size: theme.$font-size-sm;
+  line-height: 1;
+
+  &:hover {
+    color: theme.$text1-color;
+  }
+}
+
+// Control on the left, what it does on the right, each pair on its own line.
+// The control column is sized to its longest label rather than fixed, so a
+// translation that runs long moves the whole column instead of wrapping.
+:local(.hints) {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
+  margin: 0;
+}
+
+:local(.control) {
+  font-size: theme.$font-size-xs;
+  font-weight: theme.$font-weight-bold;
+  white-space: nowrap;
+}
+
+:local(.action) {
+  margin: 0;
+  font-size: theme.$font-size-xs;
+  color: theme.$text2-color;
+}
+
+:local(.dismiss) {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid theme.$button-border-color;
+  cursor: pointer;
+  font-size: theme.$font-size-xs;
+  color: theme.$text2-color;
+
+  input {
+    cursor: pointer;
+    margin: 0;
+  }
+
+  &:hover {
+    color: theme.$text1-color;
+  }
+}

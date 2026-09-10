@@ -86,6 +86,7 @@ import { StatusNudgeModal } from "./room/StatusNudgeModal";
 import { closeStatusNudge, STATUS_NUDGE_EVENT } from "../systems/status-nudge-system";
 import { setOwnStatus } from "../utils/user-status";
 import { TopDownToggleButton } from "./room/TopDownToggleButton";
+import { TopDownHintsPanel } from "./room/TopDownHintsPanel";
 import { PrivateZoneToggleButton } from "./room/PrivateZoneToggleButton";
 import { DialogerRecButton } from "./room/DialogerRecButton";
 import { PrivateZoneIndicator } from "./room/PrivateZoneIndicator";
@@ -1473,6 +1474,7 @@ class UIRoot extends Component {
                       />
                     )}
                     {entered && <PrivateZoneIndicator />}
+                    {entered && <TopDownHintsPanel scene={this.props.scene} store={this.props.store} />}
                     {!this.props.selectedObject && <CompactMoreMenuButton />}
                     {(!this.props.selectedObject ||
                       (this.props.breakpoint !== "sm" && this.props.breakpoint !== "md")) && (

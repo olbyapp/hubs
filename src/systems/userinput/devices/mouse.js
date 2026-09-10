@@ -38,6 +38,18 @@ export class MouseDevice {
         return false;
       }
     });
+    // Middle-drag pans the 2D view. Without this the browser answers the press
+    // with its own autoscroll — a scroll cursor pinned to the page and no
+    // further mousemove of ours — before the drag ever reaches the camera.
+    this.canvas.addEventListener(
+      "mousedown",
+      e => {
+        if (e.button === 1) {
+          e.preventDefault();
+        }
+      },
+      { passive: false }
+    );
     ["mousedown", "wheel"].map(x => this.canvas.addEventListener(x, queueEvent, { passive: false }));
     ["mousemove", "mouseup"].map(x => window.addEventListener(x, queueEvent, { passive: false }));
 

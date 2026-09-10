@@ -127,7 +127,15 @@ AFRAME.registerComponent("name-tag", {
     this.isAvatarReady = false;
     this.lastUpdateTime = Date.now();
     this.nameTagHeight = NAMETAG_HEIGHT;
+    this.nameTagWidth = NAMETAG_MIN_WIDTH;
     this.nameTagOffset = NAMETAG_OFFSET;
+    // Filled in by the top-down branch of the tick and read by the layout pass
+    // in name-tag-visibility-system, which hands back topDownStackOffset: how
+    // far north this plate has to move to stay off the ones around it.
+    this.topDownPreferred = new THREE.Vector3();
+    this.topDownHalfWidth = 0;
+    this.topDownHalfDepth = 0;
+    this.topDownStackOffset = 0;
     this.nameTagVolumeY = NAMETAG_VOLUME_Y;
     this.nameTagTextY = NAMETAG_TEXT_Y;
 
@@ -320,6 +328,14 @@ AFRAME.registerComponent("name-tag", {
           // A tag this large would blanket the avatar from overhead, so park it
           // north of the head — which reads as just above them on screen.
           worldPos.z -= (this.nameTagHeight / 2 + NAMETAG_TOP_DOWN_CLEARANCE) * scale;
+          // Where this plate would go if it were the only one, and how big it
+          // is once blown up. The layout pass works from these, and never from
+          // where the tag ended up, so its own nudge cannot feed back into the
+          // next frame's placement.
+          this.topDownPreferred.copy(worldPos);
+          this.topDownHalfWidth = (this.nameTagWidth * scale) / 2;
+          this.topDownHalfDepth = (this.nameTagHeight * scale) / 2;
+          worldPos.z -= this.topDownStackOffset;
           mat.compose(worldPos, NAMETAG_FACE_UP, topDownScale);
         } else {
           // Take the billboard's rotation but drop everything else: copying the
@@ -640,6 +656,9 @@ AFRAME.registerComponent("name-tag", {
     // of the text alone and the name runs out from under it.
     const width =
       this.size.x + NAMETAG_BACKGROUND_PADDING * 2 + this.statusIconSize + this.privateZoneIconSize + this.awayIconSize;
+    // Kept for the top-down layout pass: the plate is the only part of the tag
+    // whose width is worked out here rather than declared up front.
+    this.nameTagWidth = width;
     this.nametagBackground.el.setAttribute("slice9", {
       width,
       height: this.nameTagHeight

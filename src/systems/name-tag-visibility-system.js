@@ -1,5 +1,7 @@
 import { waitForDOMContentLoaded } from "../utils/async-utils";
 import { isLockedDownDemoRoom } from "../utils/hub-utils";
+import { clearTopDownNameTagLayout, layoutTopDownNameTags } from "../utils/top-down-nametag-layout";
+import { CAMERA_MODE_TOP_DOWN } from "./camera-system";
 
 export class NameTagVisibilitySystem {
   constructor(sceneEl) {
@@ -11,6 +13,7 @@ export class NameTagVisibilitySystem {
     this.onStateChanged = this.onStateChanged.bind(this);
     this.nametagVisibility = isLockedDownDemoRoom() ? "showNone" : this.store.state.preferences.nametagVisibility;
     this.nametagVisibilityDistance = Math.pow(this.store.state.preferences.nametagVisibilityDistance, 2);
+    this.wasTopDown = false;
     waitForDOMContentLoaded().then(() => {
       this.avatarRig = document.getElementById("avatar-rig").object3D;
     });
@@ -58,6 +61,17 @@ export class NameTagVisibilitySystem {
           nametag.shouldBeVisible = true;
         }
       });
+
+      // Runs from here rather than from the tags themselves because it needs
+      // every placement for the frame at once, and this system ticks after all
+      // of them.
+      const inTopDown = this.sceneEl.systems["hubs-systems"].cameraSystem.mode === CAMERA_MODE_TOP_DOWN;
+      if (inTopDown) {
+        layoutTopDownNameTags(this.components);
+      } else if (this.wasTopDown) {
+        clearTopDownNameTagLayout(this.components);
+      }
+      this.wasTopDown = inTopDown;
     };
   })();
 

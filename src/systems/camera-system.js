@@ -189,6 +189,17 @@ const TOP_DOWN_MAX_HEIGHT = 25;
 const TOP_DOWN_DEFAULT_HEIGHT = 10;
 // Raw wheel is ~0.2 per notch; 6 gives ~1.2m per notch across the 4-25m range.
 const TOP_DOWN_ZOOM_SPEED = 6;
+// How far the middle-drag may carry the view off the avatar. Far enough to read
+// the other end of an office, short enough that the way back is one step.
+const TOP_DOWN_MAX_PAN = 40;
+// e-folds per second on the way back to the avatar once you walk: about a third
+// of a second to close the distance, which reads as the view catching up rather
+// than as a cut.
+const TOP_DOWN_PAN_RETURN_RATE = 8;
+// A centimetre inside one frame is a step being taken — a walking avatar covers
+// several times that. Below it the rig is standing still and settling onto the
+// nav mesh, which is no reason to pull the view back.
+const TOP_DOWN_MOVED_EPSILON_SQ = 0.0001;
 // Where the ceiling cut goes is worked out per room; see top-down-ceiling.
 const avatarFeet = new THREE.Vector3();
 // Looking straight down with screen-up = world -Z ("north").
@@ -268,6 +279,10 @@ export class CameraSystem {
     };
 
     this.topDownHeight = TOP_DOWN_DEFAULT_HEIGHT;
+    // Middle-drag offset from the avatar, in world XZ (y here is world Z).
+    this.topDownPan = new THREE.Vector2();
+    this.topDownLastAvatarPosition = new THREE.Vector3();
+    this.topDownFollowsAvatar = false;
 
     waitForDOMContentLoaded().then(() => {
       this.avatarPOV = document.getElementById("avatar-pov-node");
@@ -331,6 +346,7 @@ export class CameraSystem {
 
     this.mode = CAMERA_MODE_TOP_DOWN;
     this.topDownHeight = TOP_DOWN_DEFAULT_HEIGHT;
+    this.resetTopDownPan();
 
     // Drop any mouse-look pitch/roll, keeping yaw: the head must not stay
     // tilted, and while flying a pitched POV would send WASD up or down.
@@ -363,6 +379,7 @@ export class CameraSystem {
     this.mode = CAMERA_MODE_FIRST_PERSON;
     this.viewingCamera.layers.disable(Layers.CAMERA_LAYER_THIRD_PERSON_ONLY);
     this.viewingCamera.layers.enable(Layers.CAMERA_LAYER_FIRST_PERSON_ONLY);
+    this.resetTopDownPan();
     removeCeilingCut();
 
     AFRAME.scenes[0].emit("top_down_mode_changed", { active: false });
@@ -374,6 +391,49 @@ export class CameraSystem {
     } else {
       this.enterTopDown();
     }
+  }
+
+  resetTopDownPan() {
+    this.topDownPan.set(0, 0);
+    // Nothing to compare the avatar against until the first frame of the mode
+    // has recorded where it stands.
+    this.topDownFollowsAvatar = false;
+  }
+
+  // What one screen pixel covers on the floor at the current camera height, so
+  // the room slides exactly as far as the mouse does.
+  topDownMetresPerPixel() {
+    const canvas = AFRAME.scenes[0].canvas;
+    const heightPx = canvas && canvas.clientHeight;
+    if (!heightPx) return 0;
+    return (2 * Math.tan(THREE.MathUtils.degToRad(this.viewingCamera.fov) / 2) * this.topDownHeight) / heightPx;
+  }
+
+  // Hold the middle button to look around the room without walking. The offset
+  // decays as soon as the avatar moves, so a step always brings the view back to
+  // the person it belongs to. The test is on the rig rather than on a movement
+  // key, which covers walking, click-to-walk, teleports and waypoints alike.
+  updateTopDownPan(dt, avatarPosition) {
+    if (this.topDownFollowsAvatar) {
+      if (avatarPosition.distanceToSquared(this.topDownLastAvatarPosition) > TOP_DOWN_MOVED_EPSILON_SQ) {
+        this.topDownPan.multiplyScalar(Math.exp((-TOP_DOWN_PAN_RETURN_RATE * (dt || 0)) / 1000));
+      }
+    } else {
+      this.topDownFollowsAvatar = true;
+    }
+    this.topDownLastAvatarPosition.copy(avatarPosition);
+
+    if (!this.userinput.get(paths.device.mouse.buttonMiddle)) return;
+    const movement = this.userinput.get(paths.device.mouse.movementXY);
+    if (!movement || (!movement[0] && !movement[1])) return;
+    const metresPerPixel = this.topDownMetresPerPixel();
+    if (!metresPerPixel) return;
+    // The room follows the mouse: dragging right slides it right, which means
+    // the camera goes left. Screen-down is world +Z, so both axes take the same
+    // sign.
+    this.topDownPan.x -= movement[0] * metresPerPixel;
+    this.topDownPan.y -= movement[1] * metresPerPixel;
+    this.topDownPan.clampLength(0, TOP_DOWN_MAX_PAN);
   }
 
   inspect(obj, distanceMod, fireChangeEvent = true) {
@@ -664,6 +724,12 @@ export class CameraSystem {
 
         this.avatarRig.object3D.updateMatrices();
         position.setFromMatrixPosition(this.avatarRig.object3D.matrixWorld);
+        // Only the camera takes the pan. The listener anchor above stays on the
+        // avatar, so looking at the far end of the room does not move your ears
+        // there with it.
+        this.updateTopDownPan(dt, position);
+        position.x += this.topDownPan.x;
+        position.z += this.topDownPan.y;
         position.y += this.topDownHeight;
         tmpMat.compose(position, TOP_DOWN_QUAT, V_ONE);
         setMatrixWorld(this.viewingRig.object3D, tmpMat);
