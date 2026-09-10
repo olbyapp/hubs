@@ -82,6 +82,11 @@ const DEAD_MIC_SAMPLES = 2;
 // so a genuinely quiet speaker still moves the counter.
 const SILENT_CONSUMER_SAMPLES = 3;
 
+// vegamix: how many ticks to wait for audio to come back after a rebuild was
+// spent on it before recording that the repair did not work. Six (a minute) is
+// long enough for the transport to reconnect and the new consumers to settle.
+const RECOVERY_WATCH_TICKS = 6;
+
 // vegamix: rebuilding the receive transport re-announces every producer, which
 // is the only safe re-sync the server offers - refreshConsumers on a live
 // transport duplicates every consumer, the server keeps no per-peer dedup. A
@@ -139,6 +144,14 @@ export class DialogAdapter extends EventEmitter {
     // The last set of microphone-less people reported, so the line is written
     // when it changes rather than every ten seconds.
     this._lastSilentKey = null;
+    // Same, for the peers whose audio was reaching us and stopped.
+    this._lastLostKey = null;
+    // peerId -> ticks waited: people a rebuild was just spent on, watched until
+    // their audio comes back or clearly does not. Without this the log cannot
+    // say whether a repair worked - a consumer that never delivers is never
+    // flagged again either, so silence afterwards means both "fixed" and
+    // "still broken".
+    this._awaitingRecovery = new Map();
     // peerId -> { misses, rebuilds }: how long somebody present has had no audio
     // reaching us, and how often that was already answered with a rebuild.
     this._peerAudioWatch = new Map();
@@ -1335,7 +1348,16 @@ export class DialogAdapter extends EventEmitter {
     }
 
     if (lost.length === 0) return;
-    this.emitRTCEvent("warn", "RTC", () => `Audio was reaching us and stopped: ${lost.join(", ")}`);
+    // Logged when the set changes, not every tick. Once a peer's two rebuilds
+    // are spent this condition can hold indefinitely, and it used to write the
+    // same line every ten seconds for as long as it did - eight identical lines
+    // for one peer on 2026-09-08. Same treatment the microphone-less line
+    // already got; I fixed one and left the other.
+    const lostKey = lost.join(",");
+    if (lostKey !== this._lastLostKey) {
+      this._lastLostKey = lostKey;
+      this.emitRTCEvent("warn", "RTC", () => `Audio was reaching us and stopped: ${lost.join(", ")}`);
+    }
     // Only spend a peer's rebuild budget if a rebuild was really scheduled;
     // pacing can drop this on the floor, and a skipped attempt must not count.
     if (this._scheduleRecvResync(`lost audio from ${lost.length} peer(s)`)) {
@@ -1355,6 +1377,23 @@ export class DialogAdapter extends EventEmitter {
     if (this._recvTransport.connectionState !== "connected") {
       this._consumerBytes.clear();
       return;
+    }
+
+    // Anyone a rebuild was spent on who still has not been heard from. Reported
+    // once, so the log says plainly that the repair failed instead of leaving
+    // its silence to be read either way.
+    for (const [peerId, ticks] of this._awaitingRecovery) {
+      if (ticks + 1 < RECOVERY_WATCH_TICKS) {
+        this._awaitingRecovery.set(peerId, ticks + 1);
+        continue;
+      }
+      this._awaitingRecovery.delete(peerId);
+      this.emitRTCEvent(
+        "warn",
+        "RTC",
+        () =>
+          `Audio did not resume from ${peerId} ${(RECOVERY_WATCH_TICKS * TRANSPORT_WATCHDOG_MS) / 1000}s after the rebuild`
+      );
     }
 
     const silent = [];
@@ -1403,12 +1442,19 @@ export class DialogAdapter extends EventEmitter {
         }
       } else {
         const wasDelivering = seen ? seen.delivered : false;
+        const nowDelivering = !!seen && bytes > seen.bytes;
+        // The answer to "did the repair work". Only a byte counter that has
+        // actually grown proves audio is flowing again.
+        if (nowDelivering && this._awaitingRecovery.has(consumer.appData.peerId)) {
+          this._awaitingRecovery.delete(consumer.appData.peerId);
+          this.emitRTCEvent("info", "RTC", () => `Audio resumed from ${consumer.appData.peerId} after the rebuild`);
+        }
         this._consumerBytes.set(consumer.id, {
           bytes,
           dead: 0,
           // The first reading is a baseline, not proof of delivery; only a
           // later reading that is larger shows audio actually flowing.
-          delivered: wasDelivering || (!!seen && bytes > seen.bytes),
+          delivered: wasDelivering || nowDelivering,
           since: seen ? seen.since : Date.now()
         });
         // Audio is arriving from this person, so whatever was spent on them
@@ -1440,7 +1486,9 @@ export class DialogAdapter extends EventEmitter {
       return true;
     });
     if (worth.length === 0) return;
-    this._scheduleRecvResync(`silent audio from ${worth.length} peer(s)`);
+    if (this._scheduleRecvResync(`silent audio from ${worth.length} peer(s)`)) {
+      for (const { peerId } of worth) this._awaitingRecovery.set(peerId, 0);
+    }
   }
 
   _scheduleRecvResync(reason) {
