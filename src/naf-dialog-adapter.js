@@ -138,6 +138,10 @@ export class DialogAdapter extends EventEmitter {
     // consumerIds whose remote producer is muted. Kept from the newConsumer
     // handshake and the consumerPaused/Resumed notifications.
     this._producerPaused = new Set();
+    // consumerId -> the server's own score for the incoming stream behind it.
+    // Zero means the SFU is receiving nothing either, so no amount of repair
+    // on this side can help.
+    this._producerScore = new Map();
     // peerId -> rebuilds already spent on their audio going silent. Separate
     // from _peerAudioWatch on purpose; see _checkSilentConsumers.
     this._silentPeerRebuilds = new Map();
@@ -609,6 +613,15 @@ export class DialogAdapter extends EventEmitter {
 
           this._consumerStats[consumerId] = this._consumerStats[consumerId] || {};
           this._consumerStats[consumerId]["score"] = score;
+
+          // vegamix: score.producerScore is how well the SERVER is receiving
+          // from the person behind this consumer - the one number that
+          // separates "their audio is not reaching me" from "their audio is
+          // not leaving them". It has always arrived here and always been
+          // thrown away with the rest of the score object.
+          if (score && typeof score.producerScore === "number") {
+            this._producerScore.set(consumerId, score.producerScore);
+          }
         }
       }
     });
@@ -721,6 +734,7 @@ export class DialogAdapter extends EventEmitter {
     this.emitRTCEvent("info", "RTC", () => `Consumer removed: ${consumerId}`);
     this._consumers.delete(consumerId);
     this._producerPaused.delete(consumerId);
+    this._producerScore.delete(consumerId);
     this._consumerBytes.delete(consumerId);
   }
 
@@ -1433,6 +1447,9 @@ export class DialogAdapter extends EventEmitter {
         if (seen.delivered && seen.dead >= SILENT_CONSUMER_SAMPLES) {
           silent.push({
             peerId: consumer.appData.peerId,
+            // The server's own view of that person's stream. Zero means the SFU
+            // is not receiving them either.
+            producerScore: this._producerScore.get(consumer.id),
             // Carried into the log so the next incident can be judged without
             // guessing: how long we have held this consumer, and how much it
             // ever brought.
@@ -1464,11 +1481,31 @@ export class DialogAdapter extends EventEmitter {
     }
 
     if (silent.length === 0) return;
+
+    // vegamix: whose fault it is decides whether repairing anything here can
+    // help. On 2026-09-15 one person's uplink died and twelve listeners each
+    // rebuilt their receive transport for it - twelve interruptions of
+    // everything they could hear, and seven of them recorded plainly that the
+    // audio did not come back, because nothing on their side was broken.
+    // producerScore is the server saying it is not receiving that person
+    // either; when it is zero there is nothing on this side left to fix.
+    const theirEnd = silent.filter(s => s.producerScore === 0);
+    const ourEnd = silent.filter(s => s.producerScore !== 0);
+
+    if (theirEnd.length) {
+      this.emitRTCEvent(
+        "warn",
+        "RTC",
+        () => `Audio is not reaching the server either, so not rebuilding: ${theirEnd.map(s => s.detail).join(", ")}`
+      );
+    }
+    if (ourEnd.length === 0) return;
+
     this.emitRTCEvent(
       "warn",
       "RTC",
       () =>
-        `Audio stopped arriving for ${(SILENT_CONSUMER_SAMPLES * TRANSPORT_WATCHDOG_MS) / 1000}s from: ${silent
+        `Audio stopped arriving for ${(SILENT_CONSUMER_SAMPLES * TRANSPORT_WATCHDOG_MS) / 1000}s from: ${ourEnd
           .map(s => s.detail)
           .join(", ")}`
     );
@@ -1479,7 +1516,7 @@ export class DialogAdapter extends EventEmitter {
     // and left nothing capped. Same reasoning as there, though: if rebuilding
     // twice did not bring this person's audio back, the fault is not one a
     // rebuild can reach, and further attempts only cost everyone else.
-    const worth = silent.filter(({ peerId }) => {
+    const worth = ourEnd.filter(({ peerId }) => {
       const used = this._silentPeerRebuilds.get(peerId) || 0;
       if (used >= 2) return false;
       this._silentPeerRebuilds.set(peerId, used + 1);
