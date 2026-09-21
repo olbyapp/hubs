@@ -87,6 +87,16 @@ const SILENT_CONSUMER_SAMPLES = 3;
 // long enough for the transport to reconnect and the new consumers to settle.
 const RECOVERY_WATCH_TICKS = 6;
 
+// vegamix: bytes of voice per tick that mean somebody is actually speaking, as
+// opposed to Opus DTX idling. One active speaker runs around 3 KB/s, so thirty
+// per tick; comfort noise is an order of magnitude below this. Only above it is
+// a silent output worth believing.
+const SPEECH_BYTES_PER_TICK = 8000;
+
+// How many ticks of "voice is arriving and nothing is coming out of the mixer"
+// before it is reported. Three, to sit out a pause between sentences.
+const DEAD_PLAYBACK_TICKS = 3;
+
 // vegamix: rebuilding the receive transport re-announces every producer, which
 // is the only safe re-sync the server offers - refreshConsumers on a live
 // transport duplicates every consumer, the server keeps no per-peer dedup. A
@@ -156,6 +166,10 @@ export class DialogAdapter extends EventEmitter {
     // flagged again either, so silence afterwards means both "fixed" and
     // "still broken".
     this._awaitingRecovery = new Map();
+    // Consecutive ticks of voice arriving while the output mixer reads flat,
+    // and the last playback reading for the telemetry snapshot.
+    this._deadPlaybackTicks = 0;
+    this._playback = null;
     // peerId -> { misses, rebuilds }: how long somebody present has had no audio
     // reaching us, and how often that was already answered with a rebuild.
     this._peerAudioWatch = new Map();
@@ -1410,6 +1424,7 @@ export class DialogAdapter extends EventEmitter {
       );
     }
 
+    let arriving = 0;
     const silent = [];
     for (const consumer of this._consumers.values()) {
       if (consumer.closed || consumer.paused) continue;
@@ -1432,6 +1447,12 @@ export class DialogAdapter extends EventEmitter {
       if (bytes === null) continue;
 
       const seen = this._consumerBytes.get(consumer.id);
+      if (seen && bytes > seen.bytes) {
+        // How much voice actually landed this tick, across everyone. Feeds the
+        // playback check below: bytes arriving is the half of the story the
+        // rest of this file already tells well.
+        arriving += bytes - seen.bytes;
+      }
       if (seen && bytes <= seen.bytes) {
         seen.dead += 1;
         // vegamix: only a consumer that was carrying audio and stopped is a
@@ -1480,6 +1501,11 @@ export class DialogAdapter extends EventEmitter {
       }
     }
 
+    // Before the early return below: whether anything is being heard is a
+    // separate question from whether any one person has gone quiet, and it
+    // needs asking on the ticks when nobody has.
+    this._runPlaybackCheck(arriving);
+
     if (silent.length === 0) return;
 
     // vegamix: whose fault it is decides whether repairing anything here can
@@ -1526,6 +1552,86 @@ export class DialogAdapter extends EventEmitter {
     if (this._scheduleRecvResync(`silent audio from ${worth.length} peer(s)`)) {
       for (const { peerId } of worth) this._awaitingRecovery.set(peerId, 0);
     }
+  }
+
+  // Placed after the byte sweep because it needs its total.
+  _runPlaybackCheck(arriving) {
+    try {
+      this._checkPlayback(arriving);
+    } catch (err) {
+      this.emitRTCEvent("error", "RTC", () => `Playback check failed: ${err}`);
+    }
+  }
+
+  // vegamix: everything else in this file asks whether the bytes arrived. None
+  // of it asks whether anybody heard them, and twice on 2026-09-21 that was the
+  // whole of the failure: Vitek and Edd each lost all audio while their
+  // transports stayed connected, every consumer kept delivering, and the
+  // watchdog had nothing to say. Edd's cause was named by the person sitting
+  // next to it - another application had taken the audio device.
+  //
+  // Hubs cannot see that happen. changeAudioOutput() returns early when the
+  // selected sinkId has not changed (audio-system.js), and for the default
+  // device it returns early always - so a device taken away while still being
+  // the chosen one produces no reaction at all.
+  //
+  // The cross-check: the SFU side already knows how many bytes of voice landed
+  // this tick, and the mixer analyser knows what is leaving the output. Voice
+  // arriving with a flat output is a fact neither half can fake.
+  _checkPlayback(arriving) {
+    const audioSystem = this.scene?.systems?.["hubs-systems"]?.audioSystem;
+    const ctx = audioSystem?.audioContext;
+    if (!audioSystem || !ctx) return;
+
+    let peak = 0;
+    try {
+      const analyser = audioSystem.mixerAnalyser;
+      const buf = new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(buf);
+      for (let i = 0; i < buf.length; i++) {
+        const d = Math.abs(buf[i] - 128);
+        if (d > peak) peak = d;
+      }
+    } catch {
+      return;
+    }
+
+    // Read by the telemetry snapshot, so a healthy session records what healthy
+    // looks like next to a broken one.
+    this._playback = { ctxState: ctx.state, peak, arriving };
+
+    // An audio context that is not running is unambiguous, and resuming it is
+    // what the existing click handler does anyway.
+    if (ctx.state !== "running") {
+      this.emitRTCEvent("warn", "RTC", () => `Audio context is ${ctx.state}, resuming it`);
+      ctx.resume().catch(() => {});
+      this._deadPlaybackTicks = 0;
+      return;
+    }
+
+    if (arriving < SPEECH_BYTES_PER_TICK || peak > 0) {
+      this._deadPlaybackTicks = 0;
+      return;
+    }
+
+    this._deadPlaybackTicks += 1;
+    if (this._deadPlaybackTicks < DEAD_PLAYBACK_TICKS) return;
+    this._deadPlaybackTicks = 0;
+
+    // Deliberately only reported. The repair - rebinding the output to whatever
+    // device now exists - is the part I want to see in the log before it starts
+    // running by itself, because every guess in this area so far has cost
+    // somebody an interruption that fixed nothing.
+    this.emitRTCEvent(
+      "warn",
+      "RTC",
+      () =>
+        `Voice is arriving (${arriving}B/tick) but the output mixer is silent - playback looks dead (sink ${
+          audioSystem.outputMediaAudio
+            ? `${audioSystem.outputMediaAudio.sinkId || "default"}${audioSystem.outputMediaAudio.paused ? ", paused" : ""}`
+            : "default"
+        })`
+    );
   }
 
   _scheduleRecvResync(reason) {

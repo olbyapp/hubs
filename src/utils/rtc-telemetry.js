@@ -119,7 +119,16 @@ function snapshot() {
         mic: dialog._micProducer ? (dialog._micProducer.paused ? "paused" : "live") : "none",
         consumers: (dialog._consumers && dialog._consumers.size) || 0,
         audioConsumers,
-        peersInRoom
+        peersInRoom,
+        // The output side. Everything above says whether the bytes arrived;
+        // these say whether anything came out of the speakers. ctx is the audio
+        // context state, peak is the level leaving the mixer, and arriving is
+        // the voice that landed in the last watchdog tick - a healthy session
+        // records what healthy looks like, which is what a broken one has to be
+        // read against.
+        ctx: dialog._playback ? dialog._playback.ctxState : null,
+        peak: dialog._playback ? dialog._playback.peak : null,
+        arriving: dialog._playback ? dialog._playback.arriving : null
       })
     );
   } catch {
