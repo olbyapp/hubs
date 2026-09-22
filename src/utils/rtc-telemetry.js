@@ -128,7 +128,12 @@ function snapshot() {
         // read against.
         ctx: dialog._playback ? dialog._playback.ctxState : null,
         peak: dialog._playback ? dialog._playback.peak : null,
-        arriving: dialog._playback ? dialog._playback.arriving : null
+        arriving: dialog._playback ? dialog._playback.arriving : null,
+        // The microphone as the local audio graph hears it. Carried for
+        // reading, not for judging: a live producer whose device has gone stale
+        // still moves bytes on comfort noise, so "sends bytes" and "sends
+        // sound" are different questions and only this one answers the second.
+        micPeak: dialog._playback ? dialog._playback.micPeak : null
       })
     );
   } catch {

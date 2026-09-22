@@ -91,7 +91,19 @@ const RECOVERY_WATCH_TICKS = 6;
 // opposed to Opus DTX idling. One active speaker runs around 3 KB/s, so thirty
 // per tick; comfort noise is an order of magnitude below this. Only above it is
 // a silent output worth believing.
-const SPEECH_BYTES_PER_TICK = 8000;
+// vegamix: bytes from ONE consumer in a tick that mean that person is actually
+// speaking. An active Opus voice stream runs about 3 KB/s, so thirty per tick;
+// DTX comfort noise is an order of magnitude below.
+//
+// Per consumer, deliberately, not summed: the first version summed across the
+// room, and eleven people idling on comfort noise cleared an 8000-byte total
+// without anybody saying a word - which is why "voice is arriving" was true in
+// two thirds of all snapshots.
+const SPEECH_BYTES_PER_TICK = 15000;
+
+// How often the output and microphone levels are sampled between watchdog
+// ticks. A hundred reads per tick, against one before.
+const LEVEL_SAMPLE_MS = 100;
 
 // How many ticks of "voice is arriving and nothing is coming out of the mixer"
 // before it is reported. Three, to sit out a pause between sentences.
@@ -170,6 +182,11 @@ export class DialogAdapter extends EventEmitter {
     // and the last playback reading for the telemetry snapshot.
     this._deadPlaybackTicks = 0;
     this._playback = null;
+    // Loudest output and microphone levels seen since the last watchdog tick,
+    // filled by the fast sampler and reset when read.
+    this._outPeak = 0;
+    this._micPeak = 0;
+    this._levelTimer = null;
     // peerId -> { misses, rebuilds }: how long somebody present has had no audio
     // reaching us, and how often that was already answered with a rebuild.
     this._peerAudioWatch = new Map();
@@ -1216,12 +1233,54 @@ export class DialogAdapter extends EventEmitter {
   _startWatchdog() {
     if (this._watchdogTimer) return;
     this._watchdogTimer = setInterval(() => this._watchdogTick(), TRANSPORT_WATCHDOG_MS);
+    // vegamix: the output level has to be sampled far more often than the
+    // watchdog runs. mixerAnalyser has fftSize 32 - two thirds of a
+    // millisecond - so reading it once per ten-second tick looks at 0.007% of
+    // the time, and speech crosses zero constantly: the first version of this
+    // check read a zero on three consecutive ticks about a quarter of the time
+    // and cried dead playback 674 times in a day, none of them real. Sampling
+    // a hundred times a tick and keeping the loudest turns a coin flip into an
+    // answer.
+    this._levelTimer = setInterval(() => this._sampleLevels(), LEVEL_SAMPLE_MS);
   }
 
   _stopWatchdog() {
+    if (this._levelTimer) {
+      clearInterval(this._levelTimer);
+      this._levelTimer = null;
+    }
     if (!this._watchdogTimer) return;
     clearInterval(this._watchdogTimer);
     this._watchdogTimer = null;
+  }
+
+  // Peak amplitude seen on an analyser right now, 0..127. Silence reads 128 on
+  // every sample, so the distance from it is the signal.
+  _peakOf(analyser) {
+    if (!analyser) return 0;
+    const buf = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(buf);
+    let peak = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const d = Math.abs(buf[i] - 128);
+      if (d > peak) peak = d;
+    }
+    return peak;
+  }
+
+  _sampleLevels() {
+    const audioSystem = this.scene?.systems?.["hubs-systems"]?.audioSystem;
+    if (!audioSystem) return;
+    try {
+      const out = this._peakOf(audioSystem.mixerAnalyser);
+      if (out > this._outPeak) this._outPeak = out;
+      // The microphone as the local graph hears it, which is a different
+      // question from whether its bytes are leaving - see the snapshot.
+      const mic = this._peakOf(audioSystem.micAnalyser || audioSystem.outboundAnalyser);
+      if (mic > this._micPeak) this._micPeak = mic;
+    } catch {
+      // An analyser can go away with its context; the next tick reads nulls.
+    }
   }
 
   async _watchdogTick() {
@@ -1481,6 +1540,13 @@ export class DialogAdapter extends EventEmitter {
       } else {
         const wasDelivering = seen ? seen.delivered : false;
         const nowDelivering = !!seen && bytes > seen.bytes;
+        // The loudest single stream this tick, which is what decides whether
+        // anybody is speaking. Summing the room cannot tell one talker from
+        // eleven idlers.
+        if (seen) {
+          const delta = bytes - seen.bytes;
+          if (delta > arriving) arriving = delta;
+        }
         // The answer to "did the repair work". Only a byte counter that has
         // actually grown proves audio is flowing again.
         if (nowDelivering && this._awaitingRecovery.has(consumer.appData.peerId)) {
@@ -1583,22 +1649,19 @@ export class DialogAdapter extends EventEmitter {
     const ctx = audioSystem?.audioContext;
     if (!audioSystem || !ctx) return;
 
-    let peak = 0;
-    try {
-      const analyser = audioSystem.mixerAnalyser;
-      const buf = new Uint8Array(analyser.fftSize);
-      analyser.getByteTimeDomainData(buf);
-      for (let i = 0; i < buf.length; i++) {
-        const d = Math.abs(buf[i] - 128);
-        if (d > peak) peak = d;
-      }
-    } catch {
-      return;
-    }
+    // Loudest moment seen across the whole tick by the sampler, not a single
+    // instant caught at the end of it.
+    const peak = this._outPeak;
+    const micPeak = this._micPeak;
+    this._outPeak = 0;
+    this._micPeak = 0;
 
     // Read by the telemetry snapshot, so a healthy session records what healthy
-    // looks like next to a broken one.
-    this._playback = { ctxState: ctx.state, peak, arriving };
+    // looks like next to a broken one. micPeak rides along unjudged: it is the
+    // half that would say whether a microphone with a live producer is carrying
+    // any sound at all - the shape of Max's stuck device on 2026-09-22 - and I
+    // want its threshold read off real sessions rather than guessed again.
+    this._playback = { ctxState: ctx.state, peak, micPeak, arriving };
 
     // An audio context that is not running is unambiguous, and resuming it is
     // what the existing click handler does anyway.
@@ -1626,7 +1689,7 @@ export class DialogAdapter extends EventEmitter {
       "warn",
       "RTC",
       () =>
-        `Voice is arriving (${arriving}B/tick) but the output mixer is silent - playback looks dead (sink ${
+        `Voice is arriving (${arriving}B/tick from one peer) but the output mixer stayed silent for the whole tick - playback looks dead (sink ${
           audioSystem.outputMediaAudio
             ? `${audioSystem.outputMediaAudio.sinkId || "default"}${audioSystem.outputMediaAudio.paused ? ", paused" : ""}`
             : "default"
