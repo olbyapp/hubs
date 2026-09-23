@@ -47,6 +47,21 @@ function name() {
   }
 }
 
+// readyState/enabled/muted of the track the microphone producer is sending.
+function micTrackState(dialog) {
+  try {
+    const producer = dialog._micProducer;
+    if (!producer) return null;
+    const track = producer.track;
+    if (!track) return "no-track";
+    return `${track.readyState}${track.enabled ? "" : ",disabled"}${track.muted ? ",muted" : ""}${
+      producer.paused ? ",producer-paused" : ""
+    }`;
+  } catch {
+    return null;
+  }
+}
+
 let buffer = [];
 let dropped = 0;
 let lastEvent = null;
@@ -137,7 +152,17 @@ function snapshot() {
         // proves the hardware works and nothing else. txPeak sits on the bus
         // feeding the encoder: what shows up there is what leaves the machine.
         micPeak: dialog._playback ? dialog._playback.micPeak : null,
-        txPeak: dialog._playback ? dialog._playback.txPeak : null
+        txPeak: dialog._playback ? dialog._playback.txPeak : null,
+        // The state of the track actually being sent. _setLocalMediaStream
+        // stops the outgoing track before replacing it, and the outgoing track
+        // is the single one belonging to the Web Audio MediaStreamDestination -
+        // stop that and it cannot be revived, so the producer stays "live" and
+        // sends silence for the rest of the session while every level meter
+        // upstream of it keeps moving. That is the shape of "I can see my
+        // microphone working and nobody hears me", and this is the field that
+        // would prove or kill it: an "ended" here with micPeak above zero says
+        // it outright.
+        micTrack: micTrackState(dialog)
       })
     );
   } catch {

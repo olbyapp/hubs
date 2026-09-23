@@ -27,6 +27,10 @@ const audioInputSelectEnabled = !(["iOS", "Mac OS"].includes(detectedOS) && ["sa
 // vegamix: the errors getUserMedia raises when the person said no, as opposed to
 // when the device is simply not available right now. Only these mean "denied" -
 // see _startMicShare.
+// getUserMedia's way of saying "there is no such device". Both spellings are in
+// the wild: Chrome and Firefox differ, and older builds used the non-Error name.
+const OVERCONSTRAINED_ERRORS = ["OverconstrainedError", "NotFoundError", "NotReadableError"];
+
 const MIC_DENIAL_ERRORS = ["NotAllowedError", "PermissionDeniedError", "SecurityError"];
 
 // How long to keep trying to reopen a microphone that went away, in ms between
@@ -275,12 +279,33 @@ export default class MediaDevicesManager extends EventEmitter {
       const { preferredMic } = this._store.state.preferences;
       deviceId = preferredMic !== NO_DEVICE_ID ? preferredMic : undefined;
     }
+    // vegamix: `exact`, not `ideal`. An ideal deviceId is a wish: when the
+    // device is gone, busy, or merely stale in the list, getUserMedia hands
+    // back a different microphone and reports no error at all - and the code
+    // below then writes THAT device into preferredMic as though it had been
+    // chosen. Pick B, silently receive A, watch the list snap back to A, and
+    // conclude the microphone will not switch. Reported twice: Max on
+    // 2026-09-22 and Dron on 2026-09-23, both with a device that had gone away
+    // but was still offered.
+    //
+    // With exact the request fails honestly, and the fallback below is a
+    // decision rather than a substitution nobody was told about.
     let constraints = { audio: {} };
     if (deviceId) {
-      constraints = { audio: { deviceId: { ideal: [deviceId] } } };
+      constraints = { audio: { deviceId: { exact: deviceId } } };
     }
 
-    const result = await this._startMicShare(constraints);
+    let result = await this._startMicShare(constraints);
+
+    // The named device could not be opened. Fall back to the default one so the
+    // person is not left without a microphone, but say so, and do not let the
+    // fallback overwrite what they asked for.
+    if (!result && deviceId && OVERCONSTRAINED_ERRORS.includes(this._lastMicError?.name)) {
+      console.warn(`Microphone ${deviceId} could not be opened; falling back to the default device`);
+      this._scene.emit(MediaDevicesEvents.MIC_SHARE_ENDED);
+      result = await this._startMicShare({ audio: {} });
+      updatePrefs = false;
+    }
 
     await this.fetchMediaDevices();
 
@@ -531,7 +556,7 @@ export default class MediaDevicesManager extends EventEmitter {
               // Writable in modern Chrome/Firefox: makes the encoder favor
               // sharpness over motion smoothness — critical for shared text.
               track.contentHint = "detail";
-            } catch (e) {
+            } catch {
               // Older browsers: hint stays default, capture resolution still helps.
             }
           }
