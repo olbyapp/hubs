@@ -129,11 +129,15 @@ function snapshot() {
         ctx: dialog._playback ? dialog._playback.ctxState : null,
         peak: dialog._playback ? dialog._playback.peak : null,
         arriving: dialog._playback ? dialog._playback.arriving : null,
-        // The microphone as the local audio graph hears it. Carried for
-        // reading, not for judging: a live producer whose device has gone stale
-        // still moves bytes on comfort noise, so "sends bytes" and "sends
-        // sound" are different questions and only this one answers the second.
-        micPeak: dialog._playback ? dialog._playback.micPeak : null
+        // Two taps on the microphone, and the gap between them is the answer
+        // to "I can see it working but nobody hears me". micPeak is the tap on
+        // the microphone itself, which keeps reading while muted by design -
+        // it is what the level bar in the UI shows, and today's log has it at
+        // p90 = 32 muted against 76 live, the same range either way, so it
+        // proves the hardware works and nothing else. txPeak sits on the bus
+        // feeding the encoder: what shows up there is what leaves the machine.
+        micPeak: dialog._playback ? dialog._playback.micPeak : null,
+        txPeak: dialog._playback ? dialog._playback.txPeak : null
       })
     );
   } catch {

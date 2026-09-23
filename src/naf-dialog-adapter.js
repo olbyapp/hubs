@@ -91,23 +91,9 @@ const RECOVERY_WATCH_TICKS = 6;
 // opposed to Opus DTX idling. One active speaker runs around 3 KB/s, so thirty
 // per tick; comfort noise is an order of magnitude below this. Only above it is
 // a silent output worth believing.
-// vegamix: bytes from ONE consumer in a tick that mean that person is actually
-// speaking. An active Opus voice stream runs about 3 KB/s, so thirty per tick;
-// DTX comfort noise is an order of magnitude below.
-//
-// Per consumer, deliberately, not summed: the first version summed across the
-// room, and eleven people idling on comfort noise cleared an 8000-byte total
-// without anybody saying a word - which is why "voice is arriving" was true in
-// two thirds of all snapshots.
-const SPEECH_BYTES_PER_TICK = 15000;
-
 // How often the output and microphone levels are sampled between watchdog
 // ticks. A hundred reads per tick, against one before.
 const LEVEL_SAMPLE_MS = 100;
-
-// How many ticks of "voice is arriving and nothing is coming out of the mixer"
-// before it is reported. Three, to sit out a pause between sentences.
-const DEAD_PLAYBACK_TICKS = 3;
 
 // vegamix: rebuilding the receive transport re-announces every producer, which
 // is the only safe re-sync the server offers - refreshConsumers on a live
@@ -180,12 +166,12 @@ export class DialogAdapter extends EventEmitter {
     this._awaitingRecovery = new Map();
     // Consecutive ticks of voice arriving while the output mixer reads flat,
     // and the last playback reading for the telemetry snapshot.
-    this._deadPlaybackTicks = 0;
     this._playback = null;
     // Loudest output and microphone levels seen since the last watchdog tick,
     // filled by the fast sampler and reset when read.
     this._outPeak = 0;
     this._micPeak = 0;
+    this._txPeak = 0;
     this._levelTimer = null;
     // peerId -> { misses, rebuilds }: how long somebody present has had no audio
     // reaching us, and how often that was already answered with a rebuild.
@@ -1274,10 +1260,25 @@ export class DialogAdapter extends EventEmitter {
     try {
       const out = this._peakOf(audioSystem.mixerAnalyser);
       if (out > this._outPeak) this._outPeak = out;
-      // The microphone as the local graph hears it, which is a different
-      // question from whether its bytes are leaving - see the snapshot.
-      const mic = this._peakOf(audioSystem.micAnalyser || audioSystem.outboundAnalyser);
+
+      // vegamix: two taps on the microphone, and the difference between them is
+      // the whole answer to "I can see it working but nobody hears me".
+      //
+      // micAnalyser is a tap on the microphone itself, placed there on purpose
+      // to keep reading while muted - it is what powers the "you are talking
+      // into a muted mic" notice. It says the hardware is delivering sound to
+      // the browser and nothing more. The level bar in the Hubs UI is fed from
+      // the same place, which is why watching it cannot tell anyone whether
+      // their voice is being sent: today's log has micPeak at p90 = 32 while
+      // muted against 76 while live, the same range either way.
+      //
+      // outboundAnalyser sits between the outbound gain and the
+      // MediaStreamDestination whose track is handed to the encoder. What shows
+      // up there is what leaves the machine.
+      const mic = this._peakOf(audioSystem.micAnalyser);
       if (mic > this._micPeak) this._micPeak = mic;
+      const tx = this._peakOf(audioSystem.outboundAnalyser);
+      if (tx > this._txPeak) this._txPeak = tx;
     } catch {
       // An analyser can go away with its context; the next tick reads nulls.
     }
@@ -1540,9 +1541,11 @@ export class DialogAdapter extends EventEmitter {
       } else {
         const wasDelivering = seen ? seen.delivered : false;
         const nowDelivering = !!seen && bytes > seen.bytes;
-        // The loudest single stream this tick, which is what decides whether
-        // anybody is speaking. Summing the room cannot tell one talker from
-        // eleven idlers.
+        // The loudest single stream this tick, recorded in the snapshot as
+        // "arriving" and judged by nobody. Per consumer, not summed across the
+        // room: an active Opus voice runs about 3 KB/s where DTX comfort noise
+        // is an order of magnitude below, so one talker is legible - but a
+        // room-wide total is cleared by a dozen people idling in silence.
         if (seen) {
           const delta = bytes - seen.bytes;
           if (delta > arriving) arriving = delta;
@@ -1653,48 +1656,39 @@ export class DialogAdapter extends EventEmitter {
     // instant caught at the end of it.
     const peak = this._outPeak;
     const micPeak = this._micPeak;
+    const txPeak = this._txPeak;
     this._outPeak = 0;
     this._micPeak = 0;
+    this._txPeak = 0;
 
     // Read by the telemetry snapshot, so a healthy session records what healthy
     // looks like next to a broken one. micPeak rides along unjudged: it is the
     // half that would say whether a microphone with a live producer is carrying
     // any sound at all - the shape of Max's stuck device on 2026-09-22 - and I
     // want its threshold read off real sessions rather than guessed again.
-    this._playback = { ctxState: ctx.state, peak, micPeak, arriving };
+    this._playback = { ctxState: ctx.state, peak, micPeak, txPeak, arriving };
 
     // An audio context that is not running is unambiguous, and resuming it is
     // what the existing click handler does anyway.
     if (ctx.state !== "running") {
       this.emitRTCEvent("warn", "RTC", () => `Audio context is ${ctx.state}, resuming it`);
       ctx.resume().catch(() => {});
-      this._deadPlaybackTicks = 0;
       return;
     }
 
-    if (arriving < SPEECH_BYTES_PER_TICK || peak > 0) {
-      this._deadPlaybackTicks = 0;
-      return;
-    }
-
-    this._deadPlaybackTicks += 1;
-    if (this._deadPlaybackTicks < DEAD_PLAYBACK_TICKS) return;
-    this._deadPlaybackTicks = 0;
-
-    // Deliberately only reported. The repair - rebinding the output to whatever
-    // device now exists - is the part I want to see in the log before it starts
-    // running by itself, because every guess in this area so far has cost
-    // somebody an interruption that fixed nothing.
-    this.emitRTCEvent(
-      "warn",
-      "RTC",
-      () =>
-        `Voice is arriving (${arriving}B/tick from one peer) but the output mixer stayed silent for the whole tick - playback looks dead (sink ${
-          audioSystem.outputMediaAudio
-            ? `${audioSystem.outputMediaAudio.sinkId || "default"}${audioSystem.outputMediaAudio.paused ? ", paused" : ""}`
-            : "default"
-        })`
-    );
+    // vegamix: the "playback looks dead" alarm that stood here is gone. Fixing
+    // its measurement - a hundred samples a tick instead of one, a per-consumer
+    // byte threshold instead of a room-wide sum - still left it firing 63 times
+    // in fifteen minutes on 2026-09-23, and the levels it fired on split by
+    // whether the person's OWN microphone was live, which is not something a
+    // reading of what the room sounds like should depend on. Everyone in a room
+    // hears the same speakers; a measure that disagrees about that is measuring
+    // something else.
+    //
+    // I said last time that a second failure meant removing it rather than
+    // tuning it a third time. The numbers below still go into the snapshot, so
+    // the question stays open to data - but nothing acts on them and nothing
+    // cries wolf while what they mean is unsettled.
   }
 
   _scheduleRecvResync(reason) {
