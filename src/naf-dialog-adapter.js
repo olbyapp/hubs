@@ -87,6 +87,10 @@ const SILENT_CONSUMER_SAMPLES = 3;
 // long enough for the transport to reconnect and the new consumers to settle.
 const RECOVERY_WATCH_TICKS = 6;
 
+// vegamix: consecutive ticks a track may carry audio without being wired into
+// any avatar before it is reported. Two, to sit out an avatar still being built.
+const ORPHAN_TRACK_TICKS = 2;
+
 // vegamix: bytes of voice per tick that mean somebody is actually speaking, as
 // opposed to Opus DTX idling. One active speaker runs around 3 KB/s, so thirty
 // per tick; comfort noise is an order of magnitude below this. Only above it is
@@ -167,6 +171,8 @@ export class DialogAdapter extends EventEmitter {
     // Consecutive ticks of voice arriving while the output mixer reads flat,
     // and the last playback reading for the telemetry snapshot.
     this._playback = null;
+    // Consecutive ticks with audio arriving on a track nothing is playing.
+    this._orphanTicks = 0;
     // Loudest output and microphone levels seen since the last watchdog tick,
     // filled by the fast sampler and reset when read.
     this._outPeak = 0;
@@ -1485,6 +1491,7 @@ export class DialogAdapter extends EventEmitter {
     }
 
     let arriving = 0;
+    const delivering = new Map();
     const silent = [];
     for (const consumer of this._consumers.values()) {
       if (consumer.closed || consumer.paused) continue;
@@ -1541,6 +1548,12 @@ export class DialogAdapter extends EventEmitter {
       } else {
         const wasDelivering = seen ? seen.delivered : false;
         const nowDelivering = !!seen && bytes > seen.bytes;
+        // Carrying audio right now, so it ought to be audible - which is a
+        // different claim from "a consumer exists", and the one worth checking.
+        // Only on confirmed growth: the first reading of a consumer is a
+        // baseline and proves nothing, and a track just created is exactly the
+        // one an avatar is still legitimately catching up with.
+        if (nowDelivering) delivering.set(consumer.track.id, consumer.appData.peerId);
         // The loudest single stream this tick, recorded in the snapshot as
         // "arriving" and judged by nobody. Per consumer, not summed across the
         // room: an active Opus voice runs about 3 KB/s where DTX comfort noise
@@ -1574,6 +1587,11 @@ export class DialogAdapter extends EventEmitter {
     // separate question from whether any one person has gone quiet, and it
     // needs asking on the ticks when nobody has.
     this._runPlaybackCheck(arriving);
+    try {
+      this._checkTracksAreWired(delivering);
+    } catch (err) {
+      this.emitRTCEvent("error", "RTC", () => `Track wiring check failed: ${err}`);
+    }
 
     if (silent.length === 0) return;
 
@@ -1689,6 +1707,61 @@ export class DialogAdapter extends EventEmitter {
     // tuning it a third time. The numbers below still go into the snapshot, so
     // the question stays open to data - but nothing acts on them and nothing
     // cries wolf while what they mean is unsettled.
+  }
+
+  // vegamix: the structural question, asked because every level-based one
+  // misled me. A consumer can be alive, connected and delivering bytes and
+  // still be inaudible, because playing it is a second step: avatar-audio-source
+  // has to take its track and wire it into the Web Audio graph. That step can be
+  // skipped silently - _onStreamUpdated returns early when the avatar has no
+  // audio object yet and never tries again, and the reconnect that rebuilds
+  // every consumer is exactly when the two can miss each other.
+  //
+  // So compare the two sets directly. No levels, no thresholds, no sampling:
+  // either a track that is carrying audio appears in some avatar's connected
+  // source, or it does not. Dron lost the room at a reconnect on 2026-09-24 and
+  // sat through fifty minutes of arriving bytes hearing nothing; this is the
+  // check that would have named it in one tick.
+  _checkTracksAreWired(deliveringTrackIds) {
+    if (!deliveringTrackIds.size || !this.scene) return;
+
+    const wired = new Set();
+    let sources = 0;
+    try {
+      for (const el of this.scene.querySelectorAll("[avatar-audio-source]")) {
+        const component = el.components && el.components["avatar-audio-source"];
+        const node = component && component.mediaStreamSource;
+        const stream = node && node.mediaStream;
+        if (!stream) continue;
+        sources += 1;
+        for (const track of stream.getAudioTracks()) wired.add(track.id);
+      }
+    } catch {
+      return;
+    }
+
+    const orphans = [];
+    for (const [trackId, peerId] of deliveringTrackIds) {
+      if (!wired.has(trackId)) orphans.push(peerId);
+    }
+    if (!orphans.length) {
+      this._orphanTicks = 0;
+      return;
+    }
+
+    // Two ticks, because an avatar entity being built is a normal moment to be
+    // briefly unwired - somebody who just walked in has not got their audio
+    // object yet.
+    this._orphanTicks += 1;
+    if (this._orphanTicks < ORPHAN_TRACK_TICKS) return;
+    this._orphanTicks = 0;
+
+    this.emitRTCEvent(
+      "warn",
+      "RTC",
+      () =>
+        `Audio is arriving but is not wired into the scene for: ${orphans.join(", ")} (${sources} avatar source(s) connected)`
+    );
   }
 
   _scheduleRecvResync(reason) {
