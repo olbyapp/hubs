@@ -146,25 +146,39 @@ AFRAME.registerComponent("avatar-audio-source", {
   },
 
   async _onStreamUpdated(peerId, kind) {
+    if (kind !== "audio") return;
+
+    const ownerId = await getOwnerId(this.el);
+    if (ownerId !== peerId) return;
+
     const audio = this.el.getObject3D(this.attrName);
-    if (!audio) return;
-    const stream = audio.source.mediaStream;
-    if (!stream) return;
 
-    getOwnerId(this.el).then(async ownerId => {
-      if (ownerId === peerId && kind === "audio") {
-        // The audio stream for this peer has been updated
-        const newStream = await APP.dialog.getMediaStream(peerId, "audio").catch(e => {
-          console.error(INFO_INIT_FAILED, `Error getting media stream for ${peerId}`, e);
-        });
+    // vegamix: this is where the handler used to give up. createAudio() awaits
+    // getMediaStream(), and closePeer() answers that wait with null the moment
+    // the peer's signalling blips - so createAudio() hits `if (!stream) return`
+    // and leaves the avatar with no audio object at all, silently. The only
+    // retry was this handler, and it was gated on the very audio object that
+    // createAudio() never got to build, so it returned too. Nothing tried
+    // again for the rest of the session: the person kept sending, every
+    // consumer stayed healthy, their bytes kept arriving, and the room could
+    // not hear them. On 2026-09-28 that was ALEX, inaudible to eleven people
+    // for three hours while eleven of twelve avatars were wired normally.
+    // A new stream for this peer is precisely the moment to try again.
+    if (!audio || !audio.source || !audio.source.mediaStream || !this.mediaStreamSource) {
+      if (!this.isCreatingAudio) this.createAudio();
+      return;
+    }
 
-        if (newStream) {
-          this.mediaStreamSource.disconnect();
-          this.mediaStreamSource = audio.context.createMediaStreamSource(newStream);
-          this.mediaStreamSource.connect(this.destination);
-        }
-      }
+    // The audio stream for this peer has been updated
+    const newStream = await APP.dialog.getMediaStream(peerId, "audio").catch(e => {
+      console.error(INFO_INIT_FAILED, `Error getting media stream for ${peerId}`, e);
     });
+
+    if (newStream) {
+      this.mediaStreamSource.disconnect();
+      this.mediaStreamSource = audio.context.createMediaStreamSource(newStream);
+      this.mediaStreamSource.connect(this.destination);
+    }
   },
 
   remove: function () {

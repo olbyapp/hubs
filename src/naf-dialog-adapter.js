@@ -90,6 +90,11 @@ const RECOVERY_WATCH_TICKS = 6;
 // vegamix: consecutive ticks a track may carry audio without being wired into
 // any avatar before it is reported. Two, to sit out an avatar still being built.
 const ORPHAN_TRACK_TICKS = 2;
+// How many times we re-announce one peer's stream before leaving it alone. The
+// repair is cheap and local - it rebuilds one avatar's audio node and touches
+// nobody else's - but if the avatar entity does not exist at all there is
+// nothing on the other end to rebuild, and repeating that forever is noise.
+const ORPHAN_REPAIRS_PER_PEER = 3;
 
 // vegamix: bytes of voice per tick that mean somebody is actually speaking, as
 // opposed to Opus DTX idling. One active speaker runs around 3 KB/s, so thirty
@@ -157,6 +162,7 @@ export class DialogAdapter extends EventEmitter {
     // peerId -> rebuilds already spent on their audio going silent. Separate
     // from _peerAudioWatch on purpose; see _checkSilentConsumers.
     this._silentPeerRebuilds = new Map();
+    this._orphanRepairs = new Map();
     // The last set of microphone-less people reported, so the line is written
     // when it changes rather than every ten seconds.
     this._lastSilentKey = null;
@@ -1757,6 +1763,9 @@ export class DialogAdapter extends EventEmitter {
 
     if (!orphans.length) {
       this._orphanTicks = 0;
+      // Wiring is whole again: let a future fault spend a fresh budget rather
+      // than inheriting the exhaustion of an old one.
+      this._orphanRepairs.clear();
       return;
     }
 
@@ -1773,6 +1782,27 @@ export class DialogAdapter extends EventEmitter {
       () =>
         `Audio is arriving but is not wired into the scene for: ${orphans.join(", ")} (${sources} avatar source(s) connected)`
     );
+
+    // vegamix: and repair it. avatar-audio-source rebuilds its audio node when
+    // it hears "stream_updated" for its owner, so saying it again is the whole
+    // fix - one avatar's node, nobody else's audio interrupted, no transport
+    // touched. This is deliberately not the recv-transport rebuild the silent-
+    // consumer watchdog uses: that one costs everyone in the room a second or
+    // two of silence, and the fault here is one avatar deep, not the transport.
+    //
+    // Needed because the handler-side fix alone does not reach everyone. When
+    // ALEX went unheard on 2026-09-28, the people who reconnected got their
+    // consumers rebuilt and would have been repaired by that alone - but
+    // Viktor-A never reconnected, never got another "stream_updated" for ALEX,
+    // and sat through three hours of arriving bytes hearing nothing. Only
+    // something that acts on the observation itself reaches him.
+    for (const peerId of new Set(orphans)) {
+      const used = this._orphanRepairs.get(peerId) || 0;
+      if (used >= ORPHAN_REPAIRS_PER_PEER) continue;
+      this._orphanRepairs.set(peerId, used + 1);
+      this.emitRTCEvent("info", "RTC", () => `Re-announcing audio for ${peerId} (repair ${used + 1})`);
+      this.emit("stream_updated", peerId, "audio");
+    }
   }
 
   _scheduleRecvResync(reason) {
