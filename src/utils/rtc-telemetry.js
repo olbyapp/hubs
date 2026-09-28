@@ -162,7 +162,14 @@ function snapshot() {
         // microphone working and nobody hears me", and this is the field that
         // would prove or kill it: an "ended" here with micPeak above zero says
         // it outright.
-        micTrack: micTrackState(dialog)
+        micTrack: micTrackState(dialog),
+        // How many avatars have their audio actually connected into the Web
+        // Audio graph, how many tracks were carrying audio, and how many of
+        // those nothing was playing. Written on every snapshot so that a
+        // healthy session says what healthy looks like.
+        wired: dialog._wiring ? dialog._wiring.sources : null,
+        delivering: dialog._wiring ? dialog._wiring.delivering : null,
+        orphans: dialog._wiring ? dialog._wiring.orphans : null
       })
     );
   } catch {

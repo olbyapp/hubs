@@ -173,6 +173,7 @@ export class DialogAdapter extends EventEmitter {
     this._playback = null;
     // Consecutive ticks with audio arriving on a track nothing is playing.
     this._orphanTicks = 0;
+    this._wiring = null;
     // Loudest output and microphone levels seen since the last watchdog tick,
     // filled by the fast sampler and reset when read.
     this._outPeak = 0;
@@ -1723,7 +1724,7 @@ export class DialogAdapter extends EventEmitter {
   // sat through fifty minutes of arriving bytes hearing nothing; this is the
   // check that would have named it in one tick.
   _checkTracksAreWired(deliveringTrackIds) {
-    if (!deliveringTrackIds.size || !this.scene) return;
+    if (!this.scene) return;
 
     const wired = new Set();
     let sources = 0;
@@ -1744,6 +1745,16 @@ export class DialogAdapter extends EventEmitter {
     for (const [trackId, peerId] of deliveringTrackIds) {
       if (!wired.has(trackId)) orphans.push(peerId);
     }
+
+    // vegamix: recorded every tick, not only when something is wrong. The first
+    // run of this check reported "0 avatar sources connected" for two people
+    // hours into their sessions and said nothing for a third who could hear
+    // nobody - and I could not tell a real zero from a query that finds nothing
+    // ever, because a passing check wrote down nothing at all. A healthy
+    // session has to state what healthy is, or the next incident gets read the
+    // same way this one did: by guessing.
+    this._wiring = { sources, delivering: deliveringTrackIds.size, orphans: orphans.length };
+
     if (!orphans.length) {
       this._orphanTicks = 0;
       return;
