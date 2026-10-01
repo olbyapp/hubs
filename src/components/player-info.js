@@ -155,6 +155,12 @@ AFRAME.registerComponent("player-info", {
     if (this.data.muted !== oldData.muted) {
       this.el.emit("remote_mute_updated", { muted: this.data.muted });
     }
+    // Lets the private zone system act on the flag as it arrives instead of on
+    // its next poll. The !! because this also runs as a store event listener,
+    // and an event carries no privateZone.
+    if (this.data.privateZone !== !!oldData.privateZone) {
+      this.el.emit("private_zone_updated");
+    }
     this.applyProperties();
   },
 

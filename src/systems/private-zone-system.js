@@ -7,18 +7,50 @@ import { updatePrivateZoneBubbles } from "../utils/private-zone-bubble";
 // crosses the radius, and a fifth of a second of lag is inaudible.
 const EVALUATE_INTERVAL_MS = 200;
 
+// A hidden tab gets no animation frames, so tick() stops — but the voices keep
+// playing. A zone switched on or walked into meanwhile went unapplied until the
+// person came back and the tab drew again: they heard the whole private
+// conversation from the background. So a timer takes over whenever frames have
+// stopped, and a flag that arrives is acted on at once rather than on that
+// timer, which the browser slows to about once a second in a hidden tab.
+const FRAMES_STALLED_AFTER_MS = 500;
+
 // Works out the bubbles, then applies them to incoming voice: whoever they
 // silence gets gain 0 through APP.privateZoneMutedState, which
 // getCurrentAudioSettings honours the same way it honours a manual mute. Kept
 // apart from APP.mutedState so that leaving a zone cannot undo a mute the
 // listener set by hand.
 export class PrivateZoneSystem {
-  constructor() {
+  constructor(sceneEl) {
     this.lastEvaluatedAt = 0;
+    this.lastTickAt = 0;
+    this.evaluationQueued = false;
     this.live = new Set();
+
+    setInterval(() => {
+      if (this.framesStalled()) this.evaluate();
+    }, EVALUATE_INTERVAL_MS);
+
+    // Emitted by player-info while NAF applies a message, i.e. from the socket
+    // handler, which runs with or without frames. Deferred to the end of that
+    // message: it may carry other avatars' positions after this one.
+    sceneEl.addEventListener("private_zone_updated", () => {
+      if (this.evaluationQueued) return;
+      this.evaluationQueued = true;
+      queueMicrotask(() => {
+        this.evaluationQueued = false;
+        this.evaluate();
+      });
+    });
+  }
+
+  framesStalled() {
+    return performance.now() - this.lastTickAt > FRAMES_STALLED_AFTER_MS;
   }
 
   tick(t) {
+    this.lastTickAt = performance.now();
+
     // Ahead of the poll gate: who is in a bubble only changes when someone
     // crosses the radius, but the dome that shows where that radius lies has to
     // follow its owner every frame or it reads as the wrong boundary.
@@ -27,8 +59,12 @@ export class PrivateZoneSystem {
     if (t - this.lastEvaluatedAt < EVALUATE_INTERVAL_MS) return;
     this.lastEvaluatedAt = t;
 
+    this.evaluate();
+  }
+
+  evaluate() {
     this.reassertOwnFlag();
-    recomputePrivateZones();
+    recomputePrivateZones(this.framesStalled());
 
     this.live.clear();
     const playerInfos = (APP.componentRegistry && APP.componentRegistry["player-info"]) || [];

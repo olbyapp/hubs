@@ -155,7 +155,7 @@ AFRAME.registerSystem("hubs-systems", {
     this.emojiSystem = new EmojiSystem(this.el);
     this.audioZonesSystem = new AudioZonesSystem();
     this.gainSystem = new GainSystem();
-    this.privateZoneSystem = new PrivateZoneSystem();
+    this.privateZoneSystem = new PrivateZoneSystem(this.el);
     this.statusNudgeSystem = new StatusNudgeSystem(this.el);
     this.speakingWhileMutedSystem = new SpeakingWhileMutedSystem(this.el);
     // No tick: the audio path is driven by an AudioWorklet, and everything

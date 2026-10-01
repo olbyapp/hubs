@@ -92,9 +92,40 @@ function notify() {
   for (const listener of listeners) listener({ active, locked, own: ownPrivateZone });
 }
 
+// Where the network last put a remote avatar. NAF does not move a remote avatar
+// as updates arrive: it queues them in an interpolation buffer and eases the
+// avatar along on the animation frame. Without frames (a hidden tab) the avatar
+// stays where it stood when they stopped, while fresh positions keep arriving
+// over the socket — and a bubble worked out from the stale spot lets through
+// whoever has since walked into it. The buffer stamps frames with a clock that
+// only the easing advances, so meanwhile each update overwrites its newest
+// frame in place: the last frame is the latest position.
+function latestNetworkedPosition(el, target) {
+  const object3D = el.object3D;
+  // Also brings the parent's world matrix up to date for the line below.
+  object3D.getWorldPosition(target);
+  const networked = el.components.networked;
+  const bufferInfos = (networked && networked.bufferInfos) || [];
+  for (const info of bufferInfos) {
+    if (info.object3D !== object3D || !info.componentNames.includes("position")) continue;
+    const frames = info.buffer.buffer;
+    // Empty only while the avatar already stands on the one update received.
+    if (frames.length > 0 && object3D.parent) {
+      target.copy(frames[frames.length - 1].position).applyMatrix4(object3D.parent.matrixWorld);
+    }
+    break;
+  }
+  return target;
+}
+
 // Rebuilds "who is in which bubble" for everyone in the room. Called from the
 // private zone system; everything else reads the result.
-export function recomputePrivateZones() {
+//
+// With frames running, positions are read off the avatars as drawn, the same
+// ones the domes are drawn from. framesStalled reads remote avatars from the
+// network instead, since the drawn ones are frozen; there is no dome to
+// disagree with then.
+export function recomputePrivateZones(framesStalled = false) {
   mySessionId = (typeof NAF !== "undefined" && NAF.clientId) || mySessionId;
 
   people.length = 0;
@@ -104,7 +135,11 @@ export function recomputePrivateZones() {
     const sessionId = playerInfo.isLocalPlayerInfo ? mySessionId : playerInfo.playerSessionId;
     if (!sessionId) continue;
     const position = pooledPosition(people.length);
-    playerInfo.el.object3D.getWorldPosition(position);
+    if (framesStalled && !playerInfo.isLocalPlayerInfo) {
+      latestNetworkedPosition(playerInfo.el, position);
+    } else {
+      playerInfo.el.object3D.getWorldPosition(position);
+    }
     people.push({
       sessionId,
       position,
