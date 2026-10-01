@@ -169,7 +169,15 @@ function snapshot() {
         // healthy session says what healthy looks like.
         wired: dialog._wiring ? dialog._wiring.sources : null,
         delivering: dialog._wiring ? dialog._wiring.delivering : null,
-        orphans: dialog._wiring ? dialog._wiring.orphans : null
+        orphans: dialog._wiring ? dialog._wiring.orphans : null,
+        // Second edition of the wiring check splits the orphans: entities is
+        // how many avatars with an audio component are in the scene at all,
+        // ghosts how many room members have none, unwired how many have one
+        // with no audio node. Three days of the first edition could not tell
+        // these apart, and the repair it fired was for the last kind only.
+        entities: dialog._wiring ? dialog._wiring.entities : null,
+        ghosts: dialog._wiring ? dialog._wiring.ghosts : null,
+        unwired: dialog._wiring ? dialog._wiring.unwired : null
       })
     );
   } catch {

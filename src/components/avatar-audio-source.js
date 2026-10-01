@@ -51,7 +51,13 @@ AFRAME.registerComponent("avatar-audio-source", {
     const stream = await getMediaStream(this.el);
     this.isCreatingAudio = false;
     const isRemoved = !this.el.parentNode;
-    if (!stream || isRemoved) return;
+    if (!stream || isRemoved) {
+      // vegamix: remembered so that a retry can say why the first attempt
+      // gave up, rather than the silence this used to be.
+      this.lastCreateFailure = !stream ? "no stream" : "removed";
+      return;
+    }
+    this.lastCreateFailure = null;
 
     APP.sourceType.set(this.el, SourceType.AVATAR_AUDIO_SOURCE);
     const { audioType } = getCurrentAudioSettings(this.el);
@@ -165,7 +171,24 @@ AFRAME.registerComponent("avatar-audio-source", {
     // for three hours while eleven of twelve avatars were wired normally.
     // A new stream for this peer is precisely the moment to try again.
     if (!audio || !audio.source || !audio.source.mediaStream || !this.mediaStreamSource) {
-      if (!this.isCreatingAudio) this.createAudio();
+      if (this.isCreatingAudio) return;
+      await this.createAudio();
+      // Say what the retry did. The adapter's repair re-announces streams on
+      // the strength of this path working, and for three days it could not
+      // tell whether it had.
+      try {
+        if (this.mediaStreamSource) {
+          APP.dialog.emitRTCEvent("info", "RTC", () => `Rewired audio for ${peerId}`);
+        } else {
+          APP.dialog.emitRTCEvent(
+            "warn",
+            "RTC",
+            () => `Rewire failed for ${peerId}: ${this.lastCreateFailure || "unknown"}`
+          );
+        }
+      } catch {
+        // Telemetry must never be the thing that breaks the room.
+      }
       return;
     }
 

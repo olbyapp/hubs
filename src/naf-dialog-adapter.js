@@ -95,6 +95,10 @@ const ORPHAN_TRACK_TICKS = 2;
 // nobody else's - but if the avatar entity does not exist at all there is
 // nothing on the other end to rebuild, and repeating that forever is noise.
 const ORPHAN_REPAIRS_PER_PEER = 3;
+// While the same set of people stays unwired, say so again this often rather
+// than every other tick: three days of the first edition were 25,000 lines
+// repeating one fact every twenty seconds.
+const ORPHAN_REALARM_MS = 5 * 60 * 1000;
 
 // vegamix: bytes of voice per tick that mean somebody is actually speaking, as
 // opposed to Opus DTX idling. One active speaker runs around 3 KB/s, so thirty
@@ -163,6 +167,8 @@ export class DialogAdapter extends EventEmitter {
     // from _peerAudioWatch on purpose; see _checkSilentConsumers.
     this._silentPeerRebuilds = new Map();
     this._orphanRepairs = new Map();
+    this._lastOrphanKey = "";
+    this._lastOrphanAlarmAt = 0;
     // The last set of microphone-less people reported, so the line is written
     // when it changes rather than every ten seconds.
     this._lastSilentKey = null;
@@ -668,7 +674,10 @@ export class DialogAdapter extends EventEmitter {
           resolve();
           this.emit(DIALOG_CONNECTION_CONNECTED);
         } catch (err) {
-          this.emitRTCEvent("warn", "Adapter", () => `Error during connect: ${error}`);
+          // vegamix: `${err}`, not `${error}` - the latter is the debug logger, and
+          // 627 lines on 2026-09-28..10-01 printed its source code in place of
+          // the reason the connection failed.
+          this.emitRTCEvent("warn", "Adapter", () => `Error during connect: ${err}`);
           reject(err);
           this.emit(DIALOG_CONNECTION_ERROR_FATAL);
         }
@@ -1732,37 +1741,101 @@ export class DialogAdapter extends EventEmitter {
   _checkTracksAreWired(deliveringTrackIds) {
     if (!this.scene) return;
 
+    // vegamix, second edition. The first one asked one question - "is this
+    // delivering track wired into some avatar?" - and three days of answers
+    // were mostly about tracks that had no avatar to be wired into: people who
+    // had stepped out to the lobby, tabs left open overnight in an empty room,
+    // our own producer coming back from a stale server-side peer. Sixteen
+    // thousand of twenty-five thousand lines, and a repair that re-announces a
+    // stream to a component that does not exist. So the question is now asked
+    // against presence and against the scene, and the answer says which of
+    // four different things an unplayed track is.
+    let presence = null;
+    try {
+      presence = window.APP && window.APP.hubChannel && window.APP.hubChannel.presence.state;
+    } catch {
+      presence = null;
+    }
+    const inRoom = peerId => {
+      if (!presence) return true;
+      const entry = presence[peerId];
+      const meta = entry && entry.metas && entry.metas[entry.metas.length - 1];
+      return !!(meta && meta.presence === "room");
+    };
+    // Synchronous version of what avatar-audio-source does with
+    // NAF.utils.getNetworkedEntity: walk up to the networked ancestor.
+    const ownerOf = el => {
+      let node = el;
+      for (let depth = 0; node && depth < 8; depth += 1) {
+        const networked = node.components && node.components.networked;
+        if (networked && networked.data) return networked.data.owner || null;
+        node = node.parentEl;
+      }
+      return null;
+    };
+
     const wired = new Set();
+    const wiredOwners = new Set();
+    const unwiredOwners = new Set();
     let sources = 0;
+    let elements = 0;
     try {
       for (const el of this.scene.querySelectorAll("[avatar-audio-source]")) {
         const component = el.components && el.components["avatar-audio-source"];
-        const node = component && component.mediaStreamSource;
+        if (!component) continue;
+        elements += 1;
+        const owner = ownerOf(el);
+        const node = component.mediaStreamSource;
         const stream = node && node.mediaStream;
-        if (!stream) continue;
+        if (!stream) {
+          if (owner) unwiredOwners.add(owner);
+          continue;
+        }
         sources += 1;
+        if (owner) wiredOwners.add(owner);
         for (const track of stream.getAudioTracks()) wired.add(track.id);
       }
     } catch {
       return;
     }
 
-    const orphans = [];
+    // Every delivering track nobody is playing, sorted by why.
+    const unwired = []; // the avatar is in the scene, its audio node is not: the fault repaired below
+    const ghosts = []; // in the room by presence, no avatar entity at all: nothing to wire to
+    let nonMembers = 0; // a consumer of somebody who is not in the room
+    let self = 0; // our own producer back at us: a stale peer on the server
     for (const [trackId, peerId] of deliveringTrackIds) {
-      if (!wired.has(trackId)) orphans.push(peerId);
+      if (wired.has(trackId)) continue;
+      if (peerId === this._clientId) {
+        self += 1;
+        continue;
+      }
+      if (!inRoom(peerId)) {
+        nonMembers += 1;
+        continue;
+      }
+      // An avatar wired to some other, older track of this peer counts as
+      // unwired too: the stream moved and the node did not follow.
+      if (unwiredOwners.has(peerId) || wiredOwners.has(peerId)) unwired.push(peerId);
+      else ghosts.push(peerId);
     }
 
-    // vegamix: recorded every tick, not only when something is wrong. The first
-    // run of this check reported "0 avatar sources connected" for two people
-    // hours into their sessions and said nothing for a third who could hear
-    // nobody - and I could not tell a real zero from a query that finds nothing
-    // ever, because a passing check wrote down nothing at all. A healthy
-    // session has to state what healthy is, or the next incident gets read the
-    // same way this one did: by guessing.
-    this._wiring = { sources, delivering: deliveringTrackIds.size, orphans: orphans.length };
+    // Recorded every tick, not only when something is wrong - a healthy
+    // session has to state what healthy is.
+    this._wiring = {
+      sources,
+      elements,
+      delivering: deliveringTrackIds.size,
+      orphans: unwired.length + ghosts.length,
+      unwired: unwired.length,
+      ghosts: ghosts.length,
+      nonMembers,
+      self
+    };
 
-    if (!orphans.length) {
+    if (!unwired.length && !ghosts.length) {
       this._orphanTicks = 0;
+      this._lastOrphanKey = "";
       // Wiring is whole again: let a future fault spend a fresh budget rather
       // than inheriting the exhaustion of an old one.
       this._orphanRepairs.clear();
@@ -1776,27 +1849,29 @@ export class DialogAdapter extends EventEmitter {
     if (this._orphanTicks < ORPHAN_TRACK_TICKS) return;
     this._orphanTicks = 0;
 
-    this.emitRTCEvent(
-      "warn",
-      "RTC",
-      () =>
-        `Audio is arriving but is not wired into the scene for: ${orphans.join(", ")} (${sources} avatar source(s) connected)`
-    );
+    const key = `${[...unwired].sort().join(",")}|${[...ghosts].sort().join(",")}`;
+    const now = Date.now();
+    if (key !== this._lastOrphanKey || now - this._lastOrphanAlarmAt >= ORPHAN_REALARM_MS) {
+      this._lastOrphanKey = key;
+      this._lastOrphanAlarmAt = now;
+      this.emitRTCEvent(
+        "warn",
+        "RTC",
+        () =>
+          `Audio is arriving but is not wired into the scene: unwired=[${unwired.join(", ")}] ghosts=[${ghosts.join(
+            ", "
+          )}] (${sources} of ${elements} avatar(s) wired, ${nonMembers} non-member and ${self} self consumer(s) ignored)`
+      );
+    }
 
-    // vegamix: and repair it. avatar-audio-source rebuilds its audio node when
-    // it hears "stream_updated" for its owner, so saying it again is the whole
-    // fix - one avatar's node, nobody else's audio interrupted, no transport
-    // touched. This is deliberately not the recv-transport rebuild the silent-
-    // consumer watchdog uses: that one costs everyone in the room a second or
-    // two of silence, and the fault here is one avatar deep, not the transport.
-    //
-    // Needed because the handler-side fix alone does not reach everyone. When
-    // ALEX went unheard on 2026-09-28, the people who reconnected got their
-    // consumers rebuilt and would have been repaired by that alone - but
-    // Viktor-A never reconnected, never got another "stream_updated" for ALEX,
-    // and sat through three hours of arriving bytes hearing nothing. Only
-    // something that acts on the observation itself reaches him.
-    for (const peerId of new Set(orphans)) {
+    // Repair only what can be repaired. avatar-audio-source rebuilds its audio
+    // node when it hears "stream_updated" for its owner, so saying it again is
+    // the whole fix for an avatar that is there - one node, nobody else's
+    // audio interrupted, no transport touched. A ghost has no component to
+    // hear it: the entity never arrived over NAF, which is a different fault
+    // in a different file, and announcing a stream to nobody 763 times taught
+    // nothing. The component reports what the retry did.
+    for (const peerId of new Set(unwired)) {
       const used = this._orphanRepairs.get(peerId) || 0;
       if (used >= ORPHAN_REPAIRS_PER_PEER) continue;
       this._orphanRepairs.set(peerId, used + 1);
